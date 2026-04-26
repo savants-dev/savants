@@ -1,0 +1,23 @@
+$ claude "Where is the log level validation in Fastify?"
+
+◐ Using Grep to search codebase...
+
+> Grep "logLevel" lib/
+  lib/symbols.js:10   kLogLevel: Symbol('fastify.logLevel')
+  lib/context.js:67   this.logLevel = logLevel || server[kLogLevel]
+  lib/route.js:287    opts.logLevel = opts.logLevel || this[kLogLevel]
+  lib/route.js:347    logLevel: opts.logLevel
+  lib/route.js:466    level: context.logLevel
+  ... (14 matches)
+
+> Read lib/route.js:280-290
+    opts.logLevel = opts.logLevel || this[kLogLevel]
+
+> Read lib/context.js:60-70
+    this.logLevel = logLevel || server[kLogLevel]
+
+> Read lib/route.js:460-470
+    level: context.logLevel
+
+⚠ Found where logLevel is USED, not where it's VALIDATED.
+  4 tool calls. ~12,000 tokens. Still searching.

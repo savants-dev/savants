@@ -1,0 +1,58 @@
+# Functional Source License, Version 1.1, Apache 2.0 Future License
+
+## Abbreviation
+
+FSL-1.1-Apache-2.0
+
+## Notice
+
+Copyright 2026 Savants
+
+## Terms and Conditions
+
+### Licensor ("We")
+
+Savants
+
+### The Software
+
+Savants — the context engine for AI coding agents.
+
+### Use Limitation
+
+You may use the Software for any purpose, including production use, except
+for the following Competing Use:
+
+You may not use the Software to provide a commercial product or service that
+is substantially similar to or competitive with any product or service that
+the Licensor provides using the Software.
+
+### License Grant
+
+The Licensor grants you a non-exclusive, worldwide, royalty-free,
+non-sublicensable, non-transferable license to use, copy, distribute,
+make available, and prepare derivative works of the Software, in each
+case subject to the Use Limitation and other terms of this License.
+
+### Change License
+
+On the second anniversary of the date of each release of the Software
+("Change Date"), the Licensor grants you the rights under the terms of the
+Apache License, Version 2.0 (the "Change License"), in addition to the
+rights granted under this License.
+
+### No Other Rights
+
+This License is not intended to limit any right that you have under
+applicable law, including fair use or any other applicable exception to
+copyright. This License does not grant any right in any trademark or
+patent of the Licensor.
+
+### Disclaimer
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

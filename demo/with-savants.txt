@@ -1,0 +1,20 @@
+$ claude "Where is the log level validation in Fastify?"
+
+◐ Using savants semantic_search...
+
+> semantic_search "log level validation"
+  lib/route.js:641       validateLogLevelOption()  [0.696] ← found it
+  lib/logger-factory.js:60  validateLogger()       [0.549]
+  lib/config-validator.js:10 validate10()          [0.440]
+
+> file_skeleton lib/route.js
+  24 functions including:
+    addNewRoute() (line 280)
+    routeHandler() (line 462)
+    validateLogLevelOption() (line 641) ← here
+
+> callers validateLogLevelOption
+  Called by: addNewRoute (lib/route.js)
+
+✓ validateLogLevelOption at line 641, called by addNewRoute.
+  3 tool calls. ~450 tokens. Done.
