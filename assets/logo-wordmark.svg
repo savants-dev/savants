@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" fill="none">
+  <!--
+    Savants Wordmark: Logo mark + text
+    For GitHub README, website header, social cards
+  -->
+
+  <!-- Logo mark (compact version) -->
+  <g transform="translate(20, 20) scale(0.31)">
+    <path d="M 160 140 A 120 120 0 0 1 352 140"
+          stroke="#22d3ee" stroke-width="36" stroke-linecap="round" fill="none"/>
+    <path d="M 352 256 A 120 120 0 0 1 160 256"
+          stroke="#22d3ee" stroke-width="36" stroke-linecap="round" fill="none"
+          opacity="0.7"/>
+    <path d="M 160 372 A 120 120 0 0 1 352 372"
+          stroke="#22d3ee" stroke-width="36" stroke-linecap="round" fill="none"
+          opacity="0.4"/>
+    <line x1="352" y1="140" x2="352" y2="256"
+          stroke="#22d3ee" stroke-width="36" stroke-linecap="round" opacity="0.85"/>
+    <line x1="160" y1="256" x2="160" y2="372"
+          stroke="#22d3ee" stroke-width="36" stroke-linecap="round" opacity="0.55"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="200" y="135" font-family="Inter, -apple-system, sans-serif"
+        font-size="96" font-weight="800" letter-spacing="-3" fill="#e5e5e5">
+    savants
+  </text>
+</svg>
