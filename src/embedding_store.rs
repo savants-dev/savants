@@ -9,7 +9,7 @@
 //!
 //! No IP. Just vectors from a public model.
 
-use std::io::{Read, Write, Cursor};
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
 const MAGIC: &[u8; 4] = b"SVEC";
@@ -31,7 +31,10 @@ pub struct EmbeddingStore {
 
 impl EmbeddingStore {
     pub fn new(dim: u32) -> Self {
-        Self { entries: vec![], dim }
+        Self {
+            entries: vec![],
+            dim,
+        }
     }
 
     pub fn add(&mut self, name: &str, file: &str, line: u32, kind: u8, embedding: Vec<f32>) {
@@ -90,10 +93,14 @@ impl EmbeddingStore {
         // Header
         let mut magic = [0u8; 4];
         cursor.read_exact(&mut magic).map_err(|_| "bad header")?;
-        if &magic != MAGIC { return Err("not a savants embedding file".to_string()); }
+        if &magic != MAGIC {
+            return Err("not a savants embedding file".to_string());
+        }
 
         let version = read_u32(&mut cursor)?;
-        if version != VERSION { return Err(format!("unsupported version: {}", version)); }
+        if version != VERSION {
+            return Err(format!("unsupported version: {}", version));
+        }
 
         let count = read_u32(&mut cursor)? as usize;
         let dim = read_u32(&mut cursor)?;
@@ -118,7 +125,11 @@ impl EmbeddingStore {
             }
 
             entries.push(StoredEntry {
-                name, file, line, kind: kind_byte[0], embedding,
+                name,
+                file,
+                line,
+                kind: kind_byte[0],
+                embedding,
             });
         }
 
@@ -132,7 +143,9 @@ impl EmbeddingStore {
 
     /// Search by cosine similarity against a query embedding.
     pub fn search(&self, query: &[f32], limit: usize) -> Vec<(usize, f32)> {
-        let mut scores: Vec<(usize, f32)> = self.entries.iter()
+        let mut scores: Vec<(usize, f32)> = self
+            .entries
+            .iter()
             .enumerate()
             .map(|(idx, entry)| (idx, cosine_sim(query, &entry.embedding)))
             .collect();
@@ -152,7 +165,9 @@ fn store_path(repo: &str) -> PathBuf {
 }
 
 fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() { return 0.0; }
+    if a.len() != b.len() {
+        return 0.0;
+    }
     let mut dot = 0.0f32;
     let mut na = 0.0f32;
     let mut nb = 0.0f32;
@@ -162,7 +177,11 @@ fn cosine_sim(a: &[f32], b: &[f32]) -> f32 {
         nb += b[i] * b[i];
     }
     let d = na.sqrt() * nb.sqrt();
-    if d > 0.0 { dot / d } else { 0.0 }
+    if d > 0.0 {
+        dot / d
+    } else {
+        0.0
+    }
 }
 
 fn read_u32(cursor: &mut Cursor<&Vec<u8>>) -> Result<u32, String> {

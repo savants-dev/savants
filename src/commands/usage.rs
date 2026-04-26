@@ -1,5 +1,5 @@
-use colored::*;
 use crate::config::State;
+use colored::*;
 
 const CLOUD_ENDPOINT: &str = "https://api.savants.cloud";
 
@@ -18,21 +18,32 @@ pub async fn run() {
     println!();
 
     let client = reqwest::Client::new();
-    let resp = match client.get(&format!("{}/api/v1/usage", CLOUD_ENDPOINT))
+    let resp = match client
+        .get(&format!("{}/api/v1/usage", CLOUD_ENDPOINT))
         .header("Authorization", format!("Bearer {}", token))
-        .send().await
+        .send()
+        .await
     {
         Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().await.unwrap_or_default(),
         Ok(r) if r.status().as_u16() == 401 => {
             println!("  Session expired. Run {} again.", "savants connect".cyan());
             return;
         }
-        _ => { println!("  Could not reach savants.cloud"); return; }
+        _ => {
+            println!("  Could not reach savants.cloud");
+            return;
+        }
     };
 
     let period = resp.get("period").and_then(|v| v.as_str()).unwrap_or("?");
-    let total_calls = resp.get("total_calls").and_then(|v| v.as_i64()).unwrap_or(0);
-    let total_cost = resp.get("total_cost_cents").and_then(|v| v.as_i64()).unwrap_or(0);
+    let total_calls = resp
+        .get("total_calls")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let total_cost = resp
+        .get("total_cost_cents")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     let plan = resp.get("plan").and_then(|v| v.as_str()).unwrap_or("?");
 
     println!("  Period:  {}", period.cyan());

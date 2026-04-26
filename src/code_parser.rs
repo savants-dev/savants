@@ -16,12 +16,12 @@ use walkdir::WalkDir;
 /// Parsed entity from source code - serializable, no database references.
 #[derive(Debug, Serialize, Clone)]
 pub struct ParsedEntity {
-    pub kind: String,       // "function", "class", "interface", "import"
+    pub kind: String, // "function", "class", "interface", "import"
     pub name: String,
-    pub file: String,       // relative path
+    pub file: String, // relative path
     pub line: usize,
     pub end_line: usize,
-    pub body: String,       // first 2000 chars
+    pub body: String, // first 2000 chars
     pub params: Vec<String>,
     pub import_source: String,
     pub import_names: Vec<String>,
@@ -51,7 +51,10 @@ pub struct CodeParser {
 
 impl CodeParser {
     pub fn new(repo_name: &str) -> Self {
-        Self { repo_name: repo_name.to_string(), workspace_map: HashMap::new() }
+        Self {
+            repo_name: repo_name.to_string(),
+            workspace_map: HashMap::new(),
+        }
     }
 
     /// Parse a repository and return structured metadata as serializable JSON.
@@ -63,8 +66,17 @@ impl CodeParser {
         let mut file_count = 0;
 
         let skip_dirs = [
-            "node_modules", ".git", "dist", "build", ".next", "target",
-            "__pycache__", ".venv", "venv", "coverage", ".turbo",
+            "node_modules",
+            ".git",
+            "dist",
+            "build",
+            ".next",
+            "target",
+            "__pycache__",
+            ".venv",
+            "venv",
+            "coverage",
+            ".turbo",
         ];
 
         for entry in WalkDir::new(repo_path)
@@ -75,14 +87,20 @@ impl CodeParser {
             })
             .filter_map(|e| e.ok())
         {
-            if !entry.file_type().is_file() { continue; }
+            if !entry.file_type().is_file() {
+                continue;
+            }
 
             let path = entry.path();
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
             let parsed = match ext {
-                "ts" | "tsx" => self.parse_file(path, repo_path, tree_sitter_typescript::language_tsx()),
-                "js" | "jsx" => self.parse_file(path, repo_path, tree_sitter_javascript::language()),
+                "ts" | "tsx" => {
+                    self.parse_file(path, repo_path, tree_sitter_typescript::language_tsx())
+                }
+                "js" | "jsx" => {
+                    self.parse_file(path, repo_path, tree_sitter_javascript::language())
+                }
                 "py" => self.parse_file(path, repo_path, tree_sitter_python::language()),
                 "rs" => self.parse_file(path, repo_path, tree_sitter_rust::language()),
                 _ => continue,
@@ -91,8 +109,10 @@ impl CodeParser {
             if let Some(file_entities) = parsed {
                 // Extract call sites from function bodies
                 let call_re = regex::Regex::new(r"(\w+)\s*\(").unwrap();
-                let skip_keywords = ["if", "for", "while", "return", "switch", "catch", "new",
-                    "typeof", "await", "import", "require", "console", "Math"];
+                let skip_keywords = [
+                    "if", "for", "while", "return", "switch", "catch", "new", "typeof", "await",
+                    "import", "require", "console", "Math",
+                ];
 
                 for e in &file_entities {
                     if e.kind == "function" {
@@ -122,13 +142,19 @@ impl CodeParser {
         }
     }
 
-    fn parse_file(&self, path: &Path, repo_root: &str, language: tree_sitter::Language) -> Option<Vec<ParsedEntity>> {
+    fn parse_file(
+        &self,
+        path: &Path,
+        repo_root: &str,
+        language: tree_sitter::Language,
+    ) -> Option<Vec<ParsedEntity>> {
         let source = std::fs::read_to_string(path).ok()?;
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(&language).ok()?;
         let tree = parser.parse(&source, None)?;
 
-        let rel_path = path.strip_prefix(repo_root)
+        let rel_path = path
+            .strip_prefix(repo_root)
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
@@ -147,22 +173,33 @@ impl CodeParser {
         entities: &mut Vec<ParsedEntity>,
         depth: usize,
     ) {
-        if depth > 20 { return; }
+        if depth > 20 {
+            return;
+        }
 
         let node = cursor.node();
         let kind = node.kind();
 
         match kind {
-            "function_declaration" | "function_definition" | "method_definition" | "function_item" => {
+            "function_declaration"
+            | "function_definition"
+            | "method_definition"
+            | "function_item" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = name_node.utf8_text(source).unwrap_or("").to_string();
                     let body_text = node.utf8_text(source).unwrap_or("");
                     let body: String = body_text.chars().take(2000).collect();
                     let params = Self::extract_params(&node, source);
                     entities.push(ParsedEntity {
-                        kind: "function".to_string(), name, file: file.to_string(),
-                        line: node.start_position().row + 1, end_line: node.end_position().row + 1,
-                        body, params, import_source: String::new(), import_names: vec![],
+                        kind: "function".to_string(),
+                        name,
+                        file: file.to_string(),
+                        line: node.start_position().row + 1,
+                        end_line: node.end_position().row + 1,
+                        body,
+                        params,
+                        import_source: String::new(),
+                        import_names: vec![],
                     });
                 }
             }
@@ -170,16 +207,25 @@ impl CodeParser {
                 // Check for variable assignment: const foo = () => {}
                 if let Some(parent) = node.parent() {
                     if parent.kind() == "variable_declarator" || parent.kind() == "pair" {
-                        if let Some(name_node) = parent.child_by_field_name("name").or_else(|| parent.child_by_field_name("key")) {
+                        if let Some(name_node) = parent
+                            .child_by_field_name("name")
+                            .or_else(|| parent.child_by_field_name("key"))
+                        {
                             let name = name_node.utf8_text(source).unwrap_or("").to_string();
                             if !name.is_empty() {
                                 let body_text = node.utf8_text(source).unwrap_or("");
                                 let body: String = body_text.chars().take(2000).collect();
                                 let params = Self::extract_params(&node, source);
                                 entities.push(ParsedEntity {
-                                    kind: "function".to_string(), name, file: file.to_string(),
-                                    line: node.start_position().row + 1, end_line: node.end_position().row + 1,
-                                    body, params, import_source: String::new(), import_names: vec![],
+                                    kind: "function".to_string(),
+                                    name,
+                                    file: file.to_string(),
+                                    line: node.start_position().row + 1,
+                                    end_line: node.end_position().row + 1,
+                                    body,
+                                    params,
+                                    import_source: String::new(),
+                                    import_names: vec![],
                                 });
                             }
                         }
@@ -190,9 +236,15 @@ impl CodeParser {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = name_node.utf8_text(source).unwrap_or("").to_string();
                     entities.push(ParsedEntity {
-                        kind: "class".to_string(), name, file: file.to_string(),
-                        line: node.start_position().row + 1, end_line: node.end_position().row + 1,
-                        body: String::new(), params: vec![], import_source: String::new(), import_names: vec![],
+                        kind: "class".to_string(),
+                        name,
+                        file: file.to_string(),
+                        line: node.start_position().row + 1,
+                        end_line: node.end_position().row + 1,
+                        body: String::new(),
+                        params: vec![],
+                        import_source: String::new(),
+                        import_names: vec![],
                     });
                 }
             }
@@ -200,9 +252,15 @@ impl CodeParser {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = name_node.utf8_text(source).unwrap_or("").to_string();
                     entities.push(ParsedEntity {
-                        kind: "interface".to_string(), name, file: file.to_string(),
-                        line: node.start_position().row + 1, end_line: node.end_position().row + 1,
-                        body: String::new(), params: vec![], import_source: String::new(), import_names: vec![],
+                        kind: "interface".to_string(),
+                        name,
+                        file: file.to_string(),
+                        line: node.start_position().row + 1,
+                        end_line: node.end_position().row + 1,
+                        body: String::new(),
+                        params: vec![],
+                        import_source: String::new(),
+                        import_names: vec![],
                     });
                 }
             }
@@ -211,10 +269,15 @@ impl CodeParser {
                 let (source_mod, names) = Self::parse_import(text);
                 if !source_mod.is_empty() {
                     entities.push(ParsedEntity {
-                        kind: "import".to_string(), name: String::new(), file: file.to_string(),
-                        line: node.start_position().row + 1, end_line: node.end_position().row + 1,
-                        body: String::new(), params: vec![],
-                        import_source: source_mod, import_names: names,
+                        kind: "import".to_string(),
+                        name: String::new(),
+                        file: file.to_string(),
+                        line: node.start_position().row + 1,
+                        end_line: node.end_position().row + 1,
+                        body: String::new(),
+                        params: vec![],
+                        import_source: source_mod,
+                        import_names: names,
                     });
                 }
             }
@@ -225,7 +288,9 @@ impl CodeParser {
         if cursor.goto_first_child() {
             loop {
                 self.walk_tree(cursor, source, file, entities, depth + 1);
-                if !cursor.goto_next_sibling() { break; }
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
             }
             cursor.goto_parent();
         }
@@ -248,16 +313,23 @@ impl CodeParser {
         let from_re = regex::Regex::new(r#"from\s+['"]([^'"]+)['"]"#).unwrap();
         let names_re = regex::Regex::new(r#"\{([^}]+)\}"#).unwrap();
 
-        let source = from_re.captures(text)
+        let source = from_re
+            .captures(text)
             .map(|c| c[1].to_string())
             .unwrap_or_default();
 
-        let names = names_re.captures(text)
-            .map(|c| c[1].split(',').map(|n| {
-                let n = n.trim();
-                // Handle "foo as bar" → "foo"
-                n.split(" as ").next().unwrap_or(n).trim().to_string()
-            }).filter(|n| !n.is_empty()).collect())
+        let names = names_re
+            .captures(text)
+            .map(|c| {
+                c[1].split(',')
+                    .map(|n| {
+                        let n = n.trim();
+                        // Handle "foo as bar" → "foo"
+                        n.split(" as ").next().unwrap_or(n).trim().to_string()
+                    })
+                    .filter(|n| !n.is_empty())
+                    .collect()
+            })
             .unwrap_or_default();
 
         (source, names)
@@ -266,12 +338,20 @@ impl CodeParser {
     fn build_workspace_map(repo_path: &str) -> HashMap<String, String> {
         let mut map = HashMap::new();
         // Walk looking for package.json files to build workspace map
-        for entry in WalkDir::new(repo_path).max_depth(4).into_iter().filter_map(|e| e.ok()) {
-            if entry.file_name() == "package.json" && !entry.path().to_string_lossy().contains("node_modules") {
+        for entry in WalkDir::new(repo_path)
+            .max_depth(4)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_name() == "package.json"
+                && !entry.path().to_string_lossy().contains("node_modules")
+            {
                 if let Ok(content) = std::fs::read_to_string(entry.path()) {
                     if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content) {
                         if let Some(name) = pkg.get("name").and_then(|n| n.as_str()) {
-                            let dir = entry.path().parent()
+                            let dir = entry
+                                .path()
+                                .parent()
                                 .unwrap_or(Path::new("."))
                                 .strip_prefix(repo_path)
                                 .unwrap_or(Path::new("."))

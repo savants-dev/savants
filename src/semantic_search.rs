@@ -40,20 +40,32 @@ pub struct IndexEntry {
 
 impl SemanticIndex {
     /// Build a search index from parsed entities.
-    pub fn from_parse_result(result: &ParseResult, engine: &mut EmbeddingEngine) -> Result<Self, String> {
+    pub fn from_parse_result(
+        result: &ParseResult,
+        engine: &mut EmbeddingEngine,
+    ) -> Result<Self, String> {
         let mut entries = vec![];
         let mut texts = vec![];
 
         for entity in &result.entities {
-            if entity.kind == "import" { continue; }
+            if entity.kind == "import" {
+                continue;
+            }
 
             // Build the text to embed.
             // Repeat name 3x and file path 2x to weight them heavily.
             // The function name and file path are the strongest semantic signals.
             // Body is noise-heavy (variable names, boilerplate) so we only take 100 chars.
             let name_expanded = expand_identifier(&entity.name);
-            let file_stem = entity.file.split('/').last().unwrap_or("")
-                .replace(".ts", "").replace(".js", "").replace(".py", "").replace(".rs", "");
+            let file_stem = entity
+                .file
+                .split('/')
+                .last()
+                .unwrap_or("")
+                .replace(".ts", "")
+                .replace(".js", "")
+                .replace(".py", "")
+                .replace(".rs", "");
             let file_context = entity.file.replace('/', " ").replace('.', " ");
             let params_text = entity.params.join(" ");
             let body_summary: String = entity.body.chars().take(100).collect();
@@ -81,40 +93,58 @@ impl SemanticIndex {
         // Batch embed all entries
         let entry_embeddings = engine.embed(&texts)?;
 
-        Ok(SemanticIndex { entries, entry_embeddings })
+        Ok(SemanticIndex {
+            entries,
+            entry_embeddings,
+        })
     }
 
     /// Get entries with their embeddings (for persistence to disk).
-    pub fn entries_with_embeddings(&self) -> impl Iterator<Item = (&IndexEntry, &embeddings::Embedding)> {
+    pub fn entries_with_embeddings(
+        &self,
+    ) -> impl Iterator<Item = (&IndexEntry, &embeddings::Embedding)> {
         self.entries.iter().zip(self.entry_embeddings.iter())
     }
 
     /// Search by natural language query using embedding similarity.
-    pub fn search(&self, query: &str, engine: &mut EmbeddingEngine, limit: usize) -> Result<Vec<SearchResult>, String> {
-        if self.entries.is_empty() { return Ok(vec![]); }
+    pub fn search(
+        &self,
+        query: &str,
+        engine: &mut EmbeddingEngine,
+        limit: usize,
+    ) -> Result<Vec<SearchResult>, String> {
+        if self.entries.is_empty() {
+            return Ok(vec![]);
+        }
 
         // Embed the query
         let query_embedding = engine.embed_one(query)?;
 
         // Score each entry by cosine similarity
-        let mut scored: Vec<(usize, f32)> = self.entry_embeddings.iter()
+        let mut scored: Vec<(usize, f32)> = self
+            .entry_embeddings
+            .iter()
             .enumerate()
             .map(|(idx, emb)| (idx, embeddings::cosine_similarity(&query_embedding, emb)))
             .collect();
 
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        Ok(scored.iter().take(limit).map(|(idx, score)| {
-            let entry = &self.entries[*idx];
-            SearchResult {
-                name: entry.name.clone(),
-                file: entry.file.clone(),
-                line: entry.line,
-                kind: entry.kind.clone(),
-                score: *score as f64,
-                snippet: entry.body_preview.clone(),
-            }
-        }).collect())
+        Ok(scored
+            .iter()
+            .take(limit)
+            .map(|(idx, score)| {
+                let entry = &self.entries[*idx];
+                SearchResult {
+                    name: entry.name.clone(),
+                    file: entry.file.clone(),
+                    line: entry.line,
+                    kind: entry.kind.clone(),
+                    score: *score as f64,
+                    snippet: entry.body_preview.clone(),
+                }
+            })
+            .collect())
     }
 }
 

@@ -21,7 +21,10 @@ impl CloudProxyServer {
     }
 
     pub fn run(&self) {
-        eprintln!("Savants MCP server started (cloud proxy -> {})", self.cloud_url);
+        eprintln!(
+            "Savants MCP server started (cloud proxy -> {})",
+            self.cloud_url
+        );
         let stdin = io::stdin();
         let stdout = io::stdout();
         let reader = stdin.lock();
@@ -33,7 +36,9 @@ impl CloudProxyServer {
                 Err(_) => break,
             };
             let trimmed = line.trim();
-            if trimmed.is_empty() { continue; }
+            if trimmed.is_empty() {
+                continue;
+            }
 
             let message: Value = match serde_json::from_str(trimmed) {
                 Ok(v) => v,
@@ -59,15 +64,18 @@ impl CloudProxyServer {
         let req_id = req_id.unwrap().clone();
 
         match method {
-            "initialize" => Some(self.response(&req_id, json!({
-                "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {
-                    "tools": {"listChanged": false},
-                    "resources": {},
-                    "prompts": {}
-                },
-                "serverInfo": {"name": "savants", "version": "0.1.0-cloud"}
-            }))),
+            "initialize" => Some(self.response(
+                &req_id,
+                json!({
+                    "protocolVersion": MCP_PROTOCOL_VERSION,
+                    "capabilities": {
+                        "tools": {"listChanged": false},
+                        "resources": {},
+                        "prompts": {}
+                    },
+                    "serverInfo": {"name": "savants", "version": "0.1.0-cloud"}
+                }),
+            )),
 
             "ping" => Some(self.response(&req_id, json!({}))),
 
@@ -104,9 +112,13 @@ impl CloudProxyServer {
                 // Reindex runs LOCALLY (parses code on user's machine),
                 // then uploads parsed entities to cloud for indexing.
                 if tool_name == "reindex" {
-                    let repo_path = arguments.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
+                    let repo_path = arguments
+                        .get("repo_path")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(".");
                     let repo_name = std::path::Path::new(repo_path)
-                        .file_name().map(|f| f.to_string_lossy().to_string())
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
                         .unwrap_or_else(|| "unknown".to_string());
 
                     if !std::path::Path::new(repo_path).is_dir() {
@@ -127,12 +139,28 @@ impl CloudProxyServer {
                     let _ = ci.save(&repo_name);
 
                     if let Ok(mut engine) = crate::embeddings::EmbeddingEngine::new() {
-                        if let Ok(index) = crate::semantic_search::SemanticIndex::from_parse_result(&result, &mut engine) {
-                            let dim = engine.embed_one("test").map(|v| v.len() as u32).unwrap_or(128);
+                        if let Ok(index) = crate::semantic_search::SemanticIndex::from_parse_result(
+                            &result,
+                            &mut engine,
+                        ) {
+                            let dim = engine
+                                .embed_one("test")
+                                .map(|v| v.len() as u32)
+                                .unwrap_or(128);
                             let mut store = crate::embedding_store::EmbeddingStore::new(dim);
                             for (entry, emb) in index.entries_with_embeddings() {
-                                let kind = match entry.kind.as_str() { "class" => 1, "interface" => 2, _ => 0 };
-                                store.add(&entry.name, &entry.file, entry.line as u32, kind, emb.clone());
+                                let kind = match entry.kind.as_str() {
+                                    "class" => 1,
+                                    "interface" => 2,
+                                    _ => 0,
+                                };
+                                store.add(
+                                    &entry.name,
+                                    &entry.file,
+                                    entry.line as u32,
+                                    kind,
+                                    emb.clone(),
+                                );
                             }
                             let _ = store.save(&repo_name);
                         }
@@ -163,21 +191,40 @@ impl CloudProxyServer {
                                 || entity.body.contains("Error");
                             // Replace body with analysis flags only
                             let mut flags = vec![];
-                            if has_validation { flags.push("validation"); }
-                            if has_error_handling { flags.push("error_handling"); }
-                            entity.body = if flags.is_empty() { String::new() } else { format!("[{}]", flags.join(",")) };
+                            if has_validation {
+                                flags.push("validation");
+                            }
+                            if has_error_handling {
+                                flags.push("error_handling");
+                            }
+                            entity.body = if flags.is_empty() {
+                                String::new()
+                            } else {
+                                format!("[{}]", flags.join(","))
+                            };
                         }
                         safe
                     };
 
-                    let mode = if full_index { "source-context (includes code snippets)" } else { "metadata-only (no source code sent)" };
+                    let mode = if full_index {
+                        "source-context (includes code snippets)"
+                    } else {
+                        "metadata-only (no source code sent)"
+                    };
                     let body_str = serde_json::to_string(&upload_data).unwrap_or_default();
                     let upload_result = std::process::Command::new("curl")
                         .args([
-                            "-sf", "--max-time", "60", "-X", "POST",
-                            "-H", &format!("Authorization: Bearer {}", self.api_key),
-                            "-H", "Content-Type: application/json",
-                            "-d", &body_str,
+                            "-sf",
+                            "--max-time",
+                            "60",
+                            "-X",
+                            "POST",
+                            "-H",
+                            &format!("Authorization: Bearer {}", self.api_key),
+                            "-H",
+                            "Content-Type: application/json",
+                            "-d",
+                            &body_str,
                             &format!("{}/api/v1/ingest", self.cloud_url),
                         ])
                         .output();
@@ -187,12 +234,15 @@ impl CloudProxyServer {
                         _ => "cloud upload failed (local index still works)".to_string(),
                     };
 
-                    return Some(self.response(&req_id, json!({
-                        "content": [{"type": "text", "text": format!(
-                            "Indexed {}: {} files, {} entities. Local cache saved. {}",
-                            repo_name, file_count, entity_count, cloud_status
-                        )}]
-                    })));
+                    return Some(self.response(
+                        &req_id,
+                        json!({
+                            "content": [{"type": "text", "text": format!(
+                                "Indexed {}: {} files, {} entities. Local cache saved. {}",
+                                repo_name, file_count, entity_count, cloud_status
+                            )}]
+                        }),
+                    ));
                 }
 
                 // All other tools: forward to cloud API
@@ -241,26 +291,12 @@ impl CloudProxyServer {
     fn cloud_get(&self, path: &str) -> Result<Value, String> {
         let url = format!("{}{}", self.cloud_url, path);
         let output = std::process::Command::new("curl")
-            .args(["-sf", "--max-time", "60", "-H", &format!("Authorization: Bearer {}", self.api_key), &url])
-            .output()
-            .map_err(|e| format!("curl failed: {}", e))?;
-        if !output.status.success() {
-            return Err(format!("HTTP error from {}", url));
-        }
-        serde_json::from_slice(&output.stdout)
-            .map_err(|e| format!("parse failed: {}", e))
-    }
-
-    fn cloud_post(&self, path: &str, body: &Value) -> Result<Value, String> {
-        let url = format!("{}{}", self.cloud_url, path);
-        let body_str = serde_json::to_string(body).unwrap();
-        let output = std::process::Command::new("curl")
             .args([
-                "-sf", "--max-time", "60",
-                "-X", "POST",
-                "-H", &format!("Authorization: Bearer {}", self.api_key),
-                "-H", "Content-Type: application/json",
-                "-d", &body_str,
+                "-sf",
+                "--max-time",
+                "60",
+                "-H",
+                &format!("Authorization: Bearer {}", self.api_key),
                 &url,
             ])
             .output()
@@ -268,8 +304,33 @@ impl CloudProxyServer {
         if !output.status.success() {
             return Err(format!("HTTP error from {}", url));
         }
-        serde_json::from_slice(&output.stdout)
-            .map_err(|e| format!("parse failed: {}", e))
+        serde_json::from_slice(&output.stdout).map_err(|e| format!("parse failed: {}", e))
+    }
+
+    fn cloud_post(&self, path: &str, body: &Value) -> Result<Value, String> {
+        let url = format!("{}{}", self.cloud_url, path);
+        let body_str = serde_json::to_string(body).unwrap();
+        let output = std::process::Command::new("curl")
+            .args([
+                "-sf",
+                "--max-time",
+                "60",
+                "-X",
+                "POST",
+                "-H",
+                &format!("Authorization: Bearer {}", self.api_key),
+                "-H",
+                "Content-Type: application/json",
+                "-d",
+                &body_str,
+                &url,
+            ])
+            .output()
+            .map_err(|e| format!("curl failed: {}", e))?;
+        if !output.status.success() {
+            return Err(format!("HTTP error from {}", url));
+        }
+        serde_json::from_slice(&output.stdout).map_err(|e| format!("parse failed: {}", e))
     }
 
     fn response(&self, id: &Value, result: Value) -> Value {

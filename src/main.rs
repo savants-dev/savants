@@ -6,19 +6,21 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 
-mod code_parser;
 mod call_index;
-mod freshness;
-mod semantic_search;
-mod embeddings;
-mod embedding_store;
-mod config;
+mod code_parser;
 mod commands;
+mod config;
+mod embedding_store;
+mod embeddings;
+mod freshness;
 mod mcp;
+mod semantic_search;
 
 #[derive(Parser)]
 #[command(name = "savants")]
-#[command(about = "The context engine for your LLM. Semantic search, code intelligence, MCP tools.")]
+#[command(
+    about = "The context engine for your LLM. Semantic search, code intelligence, MCP tools."
+)]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -89,7 +91,11 @@ async fn main() {
             println!("{}", "Indexing...".bold());
             let mut parser = code_parser::CodeParser::new(&repo_name);
             let result = parser.parse_repo(&path);
-            println!("  Parsed {} files, {} entities", result.files, result.entities.len());
+            println!(
+                "  Parsed {} files, {} entities",
+                result.files,
+                result.entities.len()
+            );
 
             // Build and cache call index (callers, importers)
             let ci = call_index::CallIndex::from_parse_result(&result);
@@ -104,14 +110,30 @@ async fn main() {
                 Ok(mut engine) => {
                     match semantic_search::SemanticIndex::from_parse_result(&result, &mut engine) {
                         Ok(index) => {
-                            let dim = engine.embed_one("test").map(|v| v.len() as u32).unwrap_or(128);
+                            let dim = engine
+                                .embed_one("test")
+                                .map(|v| v.len() as u32)
+                                .unwrap_or(128);
                             let mut store = embedding_store::EmbeddingStore::new(dim);
                             for (entry, emb) in index.entries_with_embeddings() {
-                                let kind = match entry.kind.as_str() { "class" => 1, "interface" => 2, _ => 0 };
-                                store.add(&entry.name, &entry.file, entry.line as u32, kind, emb.clone());
+                                let kind = match entry.kind.as_str() {
+                                    "class" => 1,
+                                    "interface" => 2,
+                                    _ => 0,
+                                };
+                                store.add(
+                                    &entry.name,
+                                    &entry.file,
+                                    entry.line as u32,
+                                    kind,
+                                    emb.clone(),
+                                );
                             }
                             match store.save(&repo_name) {
-                                Ok(_) => println!("  Cached {} embeddings for instant search", store.entries.len()),
+                                Ok(_) => println!(
+                                    "  Cached {} embeddings for instant search",
+                                    store.entries.len()
+                                ),
                                 Err(e) => eprintln!("  Warning: {}", e),
                             }
                         }
@@ -130,14 +152,27 @@ async fn main() {
                 println!("  Uploading to savants.cloud...");
                 let body = serde_json::to_string(&result).unwrap_or_default();
                 let output = std::process::Command::new("curl")
-                    .args(["-sf", "--max-time", "60", "-X", "POST",
-                        "-H", &format!("Authorization: Bearer {}", api_key),
-                        "-H", "Content-Type: application/json",
-                        "-d", &body, &format!("{}/api/v1/ingest", cloud_url)])
+                    .args([
+                        "-sf",
+                        "--max-time",
+                        "60",
+                        "-X",
+                        "POST",
+                        "-H",
+                        &format!("Authorization: Bearer {}", api_key),
+                        "-H",
+                        "Content-Type: application/json",
+                        "-d",
+                        &body,
+                        &format!("{}/api/v1/ingest", cloud_url),
+                    ])
                     .output();
                 match output {
                     Ok(o) if o.status.success() => println!("  {} Uploaded to cloud", "●".green()),
-                    _ => println!("  {} Cloud upload failed (tools work locally)", "●".yellow()),
+                    _ => println!(
+                        "  {} Cloud upload failed (tools work locally)",
+                        "●".yellow()
+                    ),
                 }
             }
 

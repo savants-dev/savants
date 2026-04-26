@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 #[cfg(feature = "embeddings")]
-use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 pub type Embedding = Vec<f32>;
 
@@ -26,8 +26,9 @@ impl EmbeddingEngine {
         #[cfg(feature = "embeddings")]
         {
             let model = TextEmbedding::try_new(
-                InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(true)
-            ).map_err(|e| format!("Failed to load embedding model: {}", e))?;
+                InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(true),
+            )
+            .map_err(|e| format!("Failed to load embedding model: {}", e))?;
             Ok(Self { model })
         }
 
@@ -43,7 +44,8 @@ impl EmbeddingEngine {
         {
             // fastembed's embed takes Vec<String> and batch size
             let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
-            self.model.embed(text_refs, None)
+            self.model
+                .embed(text_refs, None)
                 .map_err(|e| format!("Embedding failed: {}", e))
         }
 
@@ -57,13 +59,18 @@ impl EmbeddingEngine {
     /// Embed a single text.
     pub fn embed_one(&mut self, text: &str) -> Result<Embedding, String> {
         let results = self.embed(&[text.to_string()])?;
-        results.into_iter().next().ok_or("No embedding result".to_string())
+        results
+            .into_iter()
+            .next()
+            .ok_or("No embedding result".to_string())
     }
 }
 
 /// Cosine similarity between two embeddings.
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() { return 0.0; }
+    if a.len() != b.len() {
+        return 0.0;
+    }
     let mut dot = 0.0f32;
     let mut norm_a = 0.0f32;
     let mut norm_b = 0.0f32;
@@ -73,7 +80,11 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         norm_b += b[i] * b[i];
     }
     let denom = norm_a.sqrt() * norm_b.sqrt();
-    if denom > 0.0 { dot / denom } else { 0.0 }
+    if denom > 0.0 {
+        dot / denom
+    } else {
+        0.0
+    }
 }
 
 /// Reciprocal Rank Fusion: merge multiple ranked lists into one.
@@ -111,7 +122,11 @@ fn embed_ngram(text: &str) -> Vec<f32> {
 
     if count > 0 {
         let norm: f32 = vec.iter().map(|v| v * v).sum::<f32>().sqrt();
-        if norm > 0.0 { for v in vec.iter_mut() { *v /= norm; } }
+        if norm > 0.0 {
+            for v in vec.iter_mut() {
+                *v /= norm;
+            }
+        }
     }
     vec
 }

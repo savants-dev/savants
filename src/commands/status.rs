@@ -14,13 +14,18 @@ pub fn run() {
 
     // Local embeddings
     let cwd = std::env::current_dir().unwrap_or_default();
-    let repo = cwd.file_name()
+    let repo = cwd
+        .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_default();
 
     if !repo.is_empty() && crate::embedding_store::EmbeddingStore::exists(&repo) {
         if let Ok(store) = crate::embedding_store::EmbeddingStore::load(&repo) {
-            println!("  {} Search: {} functions indexed", "●".green(), store.entries.len());
+            println!(
+                "  {} Search: {} functions indexed",
+                "●".green(),
+                store.entries.len()
+            );
         }
     } else {
         println!("  {} Search: not indexed", "●".dimmed());

@@ -12,7 +12,9 @@ pub fn get_git_head(repo_path: &str) -> Option<String> {
     if trimmed.starts_with("ref: ") {
         // Symbolic ref - read the actual hash
         let ref_path = Path::new(repo_path).join(".git").join(&trimmed[5..]);
-        std::fs::read_to_string(&ref_path).ok().map(|s| s.trim().to_string())
+        std::fs::read_to_string(&ref_path)
+            .ok()
+            .map(|s| s.trim().to_string())
     } else {
         // Detached HEAD - hash directly
         Some(trimmed.to_string())
@@ -57,7 +59,15 @@ pub fn count_changed_files(repo: &str, repo_path: &str) -> usize {
         Err(_) => return 0,
     };
 
-    let skip = ["node_modules", ".git", "dist", "build", "target", ".next", "__pycache__"];
+    let skip = [
+        "node_modules",
+        ".git",
+        "dist",
+        "build",
+        "target",
+        ".next",
+        "__pycache__",
+    ];
     let mut changed = 0;
 
     for entry in walkdir::WalkDir::new(repo_path)
@@ -69,9 +79,17 @@ pub fn count_changed_files(repo: &str, repo_path: &str) -> usize {
         })
         .filter_map(|e| e.ok())
     {
-        if !entry.file_type().is_file() { continue; }
-        let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("");
-        if !["ts", "tsx", "js", "jsx", "py", "rs"].contains(&ext) { continue; }
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let ext = entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        if !["ts", "tsx", "js", "jsx", "py", "rs"].contains(&ext) {
+            continue;
+        }
 
         if let Ok(m) = entry.metadata() {
             if let Ok(modified) = m.modified() {
@@ -97,7 +115,8 @@ pub fn check_freshness(repo: &str, repo_path: &str) -> Option<String> {
     if changed_files > 0 {
         return Some(format!(
             "{} file{} modified since last index. Results may be incomplete. Run: savants reindex",
-            changed_files, if changed_files == 1 { "" } else { "s" }
+            changed_files,
+            if changed_files == 1 { "" } else { "s" }
         ));
     }
 
