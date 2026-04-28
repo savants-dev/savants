@@ -34,18 +34,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
-          mkdir -p savants-cli/.cargo
-          echo '[target.aarch64-unknown-linux-gnu]' >> savants-cli/.cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> savants-cli/.cargo/config.toml
+          mkdir -p ./.cargo
+          echo '[target.aarch64-unknown-linux-gnu]' >> ./.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ./.cargo/config.toml
 
       - name: Build
-        working-directory: savants-cli
+        working-directory: .
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
         run: |
           mkdir -p dist
-          cp savants-cli/target/${{ matrix.target }}/release/savants dist/savants-${{ matrix.target }}
+          cp ./target/${{ matrix.target }}/release/savants dist/savants-${{ matrix.target }}
           chmod +x dist/savants-${{ matrix.target }}
           cd dist && tar czf savants-${{ matrix.target }}.tar.gz savants-${{ matrix.target }}
 
