@@ -15,6 +15,7 @@ mod embeddings;
 mod freshness;
 mod mcp;
 mod semantic_search;
+mod update_check;
 
 #[derive(Parser)]
 #[command(name = "savants")]
@@ -49,6 +50,9 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+
+    // Background update check (non-blocking, cached 24h)
+    update_check::check_background();
 
     match cli.command {
         Commands::Up => {

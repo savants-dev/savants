@@ -1,33 +1,3 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <!--
-    Savants Logo: Abstract "S" formed by three connected arcs.
-    Represents: layers of context flowing together.
-    The three arcs = code layer, infrastructure layer, intelligence layer.
-    The gaps between = the connections Savants makes.
-    Clean, geometric, works at any size.
-  -->
-
-  <!-- Background circle (optional, for dark bg use) -->
-  <!-- <circle cx="256" cy="256" r="256" fill="#0a0a0a"/> -->
-
-  <!-- Three arcs forming an abstract S -->
-  <!-- Top arc - code layer -->
-  <path d="M 160 140 A 120 120 0 0 1 352 140"
-        stroke="#22d3ee" stroke-width="36" stroke-linecap="round" fill="none"/>
-
-  <!-- Middle arc - context layer (reversed) -->
-  <path d="M 352 256 A 120 120 0 0 1 160 256"
-        stroke="#22d3ee" stroke-width="36" stroke-linecap="round" fill="none"
-        opacity="0.7"/>
-
-  <!-- Bottom arc - intelligence layer -->
-  <path d="M 160 372 A 120 120 0 0 1 352 372"
-        stroke="#22d3ee" stroke-width="36" stroke-linecap="round" fill="none"
-        opacity="0.4"/>
-
-  <!-- Connecting lines (the flow between layers) -->
-  <line x1="352" y1="140" x2="352" y2="256"
-        stroke="#22d3ee" stroke-width="36" stroke-linecap="round" opacity="0.85"/>
-  <line x1="160" y1="256" x2="160" y2="372"
-        stroke="#22d3ee" stroke-width="36" stroke-linecap="round" opacity="0.55"/>
+  <text x="256" y="290" text-anchor="middle" font-family="Inter, -apple-system, Helvetica, Arial, sans-serif" font-size="180" font-weight="800" letter-spacing="-8" fill="#22d3ee">s.</text>
 </svg>
