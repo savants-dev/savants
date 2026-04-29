@@ -2,14 +2,70 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      should_release: ${{ steps.version.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next version
+        id: version
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          LATEST_VERSION="${LATEST_TAG#v}"
+
+          # Parse semver
+          MAJOR=$(echo "$LATEST_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$LATEST_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$LATEST_VERSION" | cut -d. -f3)
+
+          # Check commit messages since last tag for version bump hints
+          COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+
+          if echo "$COMMITS" | grep -qiE "^(BREAKING|major|!:)"; then
+            MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+          elif echo "$COMMITS" | grep -qiE "^(feat|feature)"; then
+            MINOR=$((MINOR + 1)); PATCH=0
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          TAG="v${VERSION}"
+
+          # Check if this tag already exists
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Release: ${TAG} (previous: ${LATEST_TAG})"
+
   build:
     name: Build ${{ matrix.target }}
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -28,11 +84,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Set version from git tag
+      - name: Set version from tag
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
-          # Portable sed (works on both Linux and macOS)
+          VERSION="${{ needs.version.outputs.version }}"
           sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
           rm -f Cargo.toml.bak
           grep "^version" Cargo.toml
@@ -56,18 +110,16 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${{ needs.version.outputs.tag }}"
           FILENAME="savants-${{ matrix.target }}.tar.gz"
           R2_API="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/savants-releases/objects"
 
-          # Upload to versioned path
           curl -sf -X PUT "${R2_API}/${TAG}/${FILENAME}" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/gzip" \
             --data-binary "@dist/${FILENAME}"
           echo "Uploaded to ${TAG}/${FILENAME}"
 
-          # Upload to latest/
           curl -sf -X PUT "${R2_API}/latest/${FILENAME}" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/gzip" \
@@ -80,9 +132,9 @@ jobs:
           path: dist/savants-${{ matrix.target }}.tar.gz
 
   release:
-    name: Create GitHub Release
-    needs: build
-    if: always() && contains(needs.build.result, 'success')
+    name: Create Release
+    needs: [version, build]
+    if: always() && needs.version.outputs.should_release == 'true' && contains(needs.build.result, 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -92,19 +144,27 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create GitHub release
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ needs.version.outputs.tag }}" -m "Release ${{ needs.version.outputs.tag }}"
+          git push origin "${{ needs.version.outputs.tag }}"
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Savants ${{ needs.version.outputs.tag }}
           files: artifacts/*/savants-*.tar.gz
           generate_release_notes: true
 
-      - name: Update version.txt and install.sh
+      - name: Update version.txt and install.sh in R2
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
+          VERSION="${{ needs.version.outputs.version }}"
           R2_API="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/savants-releases/objects"
 
           echo -n "${VERSION}" | curl -sf -X PUT "${R2_API}/latest/version.txt" \
