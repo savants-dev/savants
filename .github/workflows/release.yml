@@ -28,6 +28,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Set version from git tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          # Portable sed (works on both Linux and macOS)
+          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+          rm -f Cargo.toml.bak
+          grep "^version" Cargo.toml
+
       - name: Install OpenSSL (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
