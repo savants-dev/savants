@@ -42,14 +42,38 @@ jobs:
           chmod +x dist/savants-${{ matrix.target }}
           cd dist && tar czf savants-${{ matrix.target }}.tar.gz savants-${{ matrix.target }}
 
+      - name: Upload to R2
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          FILENAME="savants-${{ matrix.target }}.tar.gz"
+          R2_API="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/savants-releases/objects"
+
+          # Upload to versioned path
+          curl -sf -X PUT "${R2_API}/${TAG}/${FILENAME}" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/gzip" \
+            --data-binary "@dist/${FILENAME}"
+          echo "Uploaded to ${TAG}/${FILENAME}"
+
+          # Upload to latest/
+          curl -sf -X PUT "${R2_API}/latest/${FILENAME}" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/gzip" \
+            --data-binary "@dist/${FILENAME}"
+          echo "Uploaded to latest/${FILENAME}"
+
       - uses: actions/upload-artifact@v4
         with:
           name: savants-${{ matrix.target }}
           path: dist/savants-${{ matrix.target }}.tar.gz
 
   release:
-    name: Create Release + Upload to R2
+    name: Create GitHub Release
     needs: build
+    if: always() && contains(needs.build.result, 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -65,7 +89,7 @@ jobs:
           files: artifacts/*/savants-*.tar.gz
           generate_release_notes: true
 
-      - name: Upload to R2
+      - name: Update version.txt and install.sh
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -74,33 +98,12 @@ jobs:
           VERSION="${TAG#v}"
           R2_API="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/savants-releases/objects"
 
-          for f in artifacts/*/savants-*.tar.gz; do
-            FILENAME=$(basename "$f")
-            echo "Uploading ${FILENAME}..."
-
-            # Versioned path
-            curl -sf -X PUT "${R2_API}/${TAG}/${FILENAME}" \
-              -H "Authorization: Bearer ${CF_API_TOKEN}" \
-              -H "Content-Type: application/gzip" \
-              --data-binary "@${f}"
-
-            # Latest path
-            curl -sf -X PUT "${R2_API}/latest/${FILENAME}" \
-              -H "Authorization: Bearer ${CF_API_TOKEN}" \
-              -H "Content-Type: application/gzip" \
-              --data-binary "@${f}"
-
-            echo "Done: ${FILENAME}"
-          done
-
-          # Update version.txt
           echo -n "${VERSION}" | curl -sf -X PUT "${R2_API}/latest/version.txt" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: text/plain" \
             --data-binary "@-"
           echo "Updated version.txt to ${VERSION}"
 
-          # Update install.sh
           curl -sf -X PUT "${R2_API}/install.sh" \
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: text/plain" \
