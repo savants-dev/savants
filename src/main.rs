@@ -45,6 +45,26 @@ enum Commands {
         #[arg(long)]
         repo_path: Option<String>,
     },
+    /// Register savants MCP server with your AI tool
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpAction {
+    /// Install savants MCP server for Claude Code / Cursor / Windsurf
+    Install {
+        /// Scope: "user" (global) or "project" (current dir)
+        #[arg(long, default_value = "user")]
+        scope: String,
+        /// Target tool: "claude", "cursor", or auto-detect
+        #[arg(long, default_value = "auto")]
+        tool: String,
+    },
+    /// Show MCP server status
+    Status,
 }
 
 #[tokio::main]
@@ -80,6 +100,14 @@ async fn main() {
         Commands::Usage => {
             commands::usage::run().await;
         }
+        Commands::Mcp { action } => match action {
+            McpAction::Install { scope, tool } => {
+                commands::mcp::install(&scope, &tool);
+            }
+            McpAction::Status => {
+                commands::mcp::status();
+            }
+        },
         Commands::Reindex { repo_path } => {
             let path = repo_path.unwrap_or_else(|| {
                 std::env::current_dir()
