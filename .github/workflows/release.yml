@@ -151,13 +151,72 @@ jobs:
           git tag "${{ needs.version.outputs.tag }}" -m "Release ${{ needs.version.outputs.tag }}"
           git push origin "${{ needs.version.outputs.tag }}"
 
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${{ needs.version.outputs.tag }}"
+          VERSION="${{ needs.version.outputs.version }}"
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          # Build structured release notes
+          {
+            echo "## Install"
+            echo ""
+            echo '```sh'
+            echo "curl -fsSL savants.sh | sh"
+            echo '```'
+            echo ""
+            echo "## What's Changed"
+            echo ""
+
+            if [ -n "$PREV_TAG" ]; then
+              # Features
+              FEATS=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --grep="^feat" -i 2>/dev/null)
+              if [ -n "$FEATS" ]; then
+                echo "### Features"
+                echo "$FEATS"
+                echo ""
+              fi
+
+              # Fixes
+              FIXES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --grep="^fix" -i 2>/dev/null)
+              if [ -n "$FIXES" ]; then
+                echo "### Fixes"
+                echo "$FIXES"
+                echo ""
+              fi
+
+              # Other
+              OTHER=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --invert-grep --grep="^feat" --grep="^fix" -i 2>/dev/null)
+              if [ -n "$OTHER" ]; then
+                echo "### Other"
+                echo "$OTHER"
+                echo ""
+              fi
+            else
+              git log --pretty=format:"- %s" -20
+              echo ""
+            fi
+
+            echo ""
+            echo "## Binaries"
+            echo ""
+            echo "| Platform | Download |"
+            echo "|----------|----------|"
+            echo "| Linux x86_64 | \`savants-x86_64-unknown-linux-gnu.tar.gz\` |"
+            echo "| macOS Intel | \`savants-x86_64-apple-darwin.tar.gz\` |"
+            echo "| macOS Apple Silicon | \`savants-aarch64-apple-darwin.tar.gz\` |"
+          } > /tmp/release_notes.md
+
+          cat /tmp/release_notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: Savants ${{ needs.version.outputs.tag }}
+          body_path: /tmp/release_notes.md
           files: artifacts/*/savants-*.tar.gz
-          generate_release_notes: true
 
       - name: Update version.txt and install.sh in R2
         env:
