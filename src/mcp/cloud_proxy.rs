@@ -109,6 +109,23 @@ impl CloudProxyServer {
                 let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
+                // LOCAL tools run on user's machine - never proxy to cloud
+                let local_tools = [
+                    "semantic_search",
+                    "file_skeleton",
+                    "where_used",
+                    "callers",
+                    "session_stats",
+                ];
+                if local_tools.contains(&tool_name) {
+                    let offline = super::offline::OfflineServer::new();
+                    let result = offline.call_tool_direct(tool_name, &arguments);
+                    return match result {
+                        Ok(text) => Some(self.response(&req_id, json!({"content": [{"type": "text", "text": text}]}))),
+                        Err(e) => Some(self.response(&req_id, json!({"content": [{"type": "text", "text": format!("Error: {}", e)}], "isError": true}))),
+                    };
+                }
+
                 // Reindex runs LOCALLY (parses code on user's machine),
                 // then uploads parsed entities to cloud for indexing.
                 if tool_name == "reindex" {

@@ -320,6 +320,11 @@ impl OfflineServer {
         ])
     }
 
+    /// Public entry point for cloud proxy to call local tools directly.
+    pub fn call_tool_direct(&self, tool: &str, args: &Value) -> Result<String, String> {
+        self.call_tool(tool, args)
+    }
+
     fn call_tool(&self, tool: &str, args: &Value) -> Result<String, String> {
         match tool {
             "semantic_search" => self.tool_semantic_search(args),
