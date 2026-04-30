@@ -56,7 +56,54 @@ impl SessionStats {
         };
         let time_saved_seconds = estimated_grep_calls as u64 * 5; // ~5s per grep+read cycle
 
+        // ── Savants Efficiency Score (SES) ──
+        // Single metric 0-1000 that captures how efficient the AI agent is with savants.
+        // Components:
+        //   Token efficiency (40%): tokens used vs estimated without savants
+        //   Call efficiency (30%): tool calls vs estimated grep/read calls
+        //   Speed efficiency (20%): avg response time vs estimated grep time
+        //   Usage breadth (10%): variety of savants tools used
+        let token_score = if estimated_grep_tokens > 0 {
+            ((tokens_saved as f64 / estimated_grep_tokens as f64) * 400.0).min(400.0) as u32
+        } else { 0 };
+
+        let call_score = if estimated_grep_calls > 0 {
+            let ratio = 1.0 - (self.total_calls as f64 / (self.total_calls + estimated_grep_calls) as f64);
+            (ratio * 300.0).min(300.0) as u32
+        } else { 0 };
+
+        let speed_score = if self.total_calls > 0 {
+            let avg_ms = self.total_duration_ms / self.total_calls as u64;
+            if avg_ms < 500 { 200 }
+            else if avg_ms < 1000 { 150 }
+            else if avg_ms < 2000 { 100 }
+            else { 50 }
+        } else { 0 };
+
+        let tools_used = self.calls_by_tool.len() as u32;
+        let breadth_score = (tools_used * 25).min(100);
+
+        let ses = token_score + call_score + speed_score + breadth_score;
+
+        let ses_label = if ses >= 900 { "Exceptional" }
+            else if ses >= 750 { "Excellent" }
+            else if ses >= 600 { "Good" }
+            else if ses >= 400 { "Moderate" }
+            else if ses > 0 { "Getting started" }
+            else { "No data yet" };
+
         json!({
+            "savants_efficiency_score": {
+                "score": ses,
+                "max": 1000,
+                "label": ses_label,
+                "breakdown": {
+                    "token_efficiency": { "score": token_score, "max": 400, "description": "Tokens used vs estimated without savants" },
+                    "call_efficiency": { "score": call_score, "max": 300, "description": "Tool calls vs estimated grep/read calls" },
+                    "speed_efficiency": { "score": speed_score, "max": 200, "description": "Average response time" },
+                    "usage_breadth": { "score": breadth_score, "max": 100, "description": "Variety of savants tools used" },
+                },
+            },
             "session": {
                 "duration_seconds": session_seconds,
                 "total_tool_calls": self.total_calls,
@@ -76,7 +123,8 @@ impl SessionStats {
                 "estimated_time_saved_seconds": time_saved_seconds,
             },
             "summary": format!(
-                "This session: {} savants calls, ~{} tokens. Without savants: ~{} grep/read calls, ~{} tokens. Saved {}% tokens and ~{}s.",
+                "Savants Efficiency Score: {}/1000 ({}). {} savants calls, ~{} tokens. Without savants: ~{} grep/read calls, ~{} tokens. Saved {}% tokens.",
+                ses, ses_label,
                 self.total_calls,
                 self.total_tokens_returned,
                 estimated_grep_calls,
@@ -215,7 +263,7 @@ impl OfflineServer {
             },
             {
                 "name": "session_stats",
-                "description": "SESSION ANALYTICS: Shows how many tool calls, tokens used, and time saved vs grep/read in this session. Call this to see your ROI. Zero cost.",
+                "description": "SAVANTS EFFICIENCY SCORE: Shows your SES (0-1000) measuring how much more efficient your AI agent is with savants. Tracks tokens saved, calls avoided, and speed improvement. Call at end of session to see your score. Zero cost.",
                 "inputSchema": {"type": "object", "properties": {}}
             }
         ])
