@@ -89,13 +89,14 @@ impl CloudProxyServer {
                             .unwrap_or(&vec![])
                             .iter()
                             .map(|t| {
+                                let schema = t.get("input_schema")
+                                    .or_else(|| t.get("inputSchema"))
+                                    .cloned()
+                                    .unwrap_or(json!({"type": "object", "properties": {}}));
                                 json!({
                                     "name": t.get("name").and_then(|v| v.as_str()).unwrap_or(""),
                                     "description": t.get("description").and_then(|v| v.as_str()).unwrap_or(""),
-                                    "inputSchema": {
-                                        "type": "object",
-                                        "properties": {}
-                                    }
+                                    "inputSchema": schema
                                 })
                             })
                             .collect();
@@ -242,7 +243,7 @@ impl CloudProxyServer {
                             "Content-Type: application/json",
                             "-d",
                             &body_str,
-                            &format!("{}/api/v1/ingest", self.cloud_url),
+                            &format!("{}/api/v1/ingest/parse-result", self.cloud_url),
                         ])
                         .output();
 
