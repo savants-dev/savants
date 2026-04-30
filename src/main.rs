@@ -50,6 +50,11 @@ enum Commands {
         #[command(subcommand)]
         action: McpAction,
     },
+    /// Search and manage documentation sources
+    Docs {
+        #[command(subcommand)]
+        action: DocsAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -65,6 +70,27 @@ enum McpAction {
     },
     /// Show MCP server status
     Status,
+}
+
+#[derive(Subcommand)]
+enum DocsAction {
+    /// List available documentation sources
+    List,
+    /// Search a documentation source
+    Search {
+        /// Documentation provider (e.g. stripe, cloudflare, react)
+        provider: String,
+        /// Search query
+        query: Vec<String>,
+    },
+    /// Upload local markdown docs to savants.cloud
+    Upload {
+        /// Path to directory containing markdown files
+        path: String,
+        /// Project name for the uploaded docs
+        #[arg(long)]
+        project: String,
+    },
 }
 
 #[tokio::main]
@@ -106,6 +132,18 @@ async fn main() {
             }
             McpAction::Status => {
                 commands::mcp::status();
+            }
+        },
+        Commands::Docs { action } => match action {
+            DocsAction::List => {
+                commands::docs::list().await;
+            }
+            DocsAction::Search { provider, query } => {
+                let q = query.join(" ");
+                commands::docs::search(&provider, &q).await;
+            }
+            DocsAction::Upload { path, project } => {
+                commands::docs::upload(&path, &project).await;
             }
         },
         Commands::Reindex { repo_path } => {
