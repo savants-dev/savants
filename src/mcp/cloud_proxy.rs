@@ -265,7 +265,7 @@ impl CloudProxyServer {
                 // All other tools: forward to cloud API
                 let body = json!({
                     "tool": tool_name,
-                    "arguments": arguments,
+                    "input": arguments,
                 });
 
                 match self.cloud_post("/api/v1/tools/call", &body) {
