@@ -16,7 +16,7 @@ pub async fn run() {
 
     let client = reqwest::Client::new();
     let code_response = match client
-        .post(&format!("{}/auth/device/code", CLOUD_ENDPOINT))
+        .post(format!("{}/auth/device/code", CLOUD_ENDPOINT))
         .send()
         .await
     {
@@ -63,7 +63,7 @@ pub async fn run() {
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
 
         let poll_response = match client
-            .post(&format!("{}/auth/device/token", CLOUD_ENDPOINT))
+            .post(format!("{}/auth/device/token", CLOUD_ENDPOINT))
             .json(&serde_json::json!({"device_code": device_code}))
             .send()
             .await

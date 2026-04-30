@@ -9,9 +9,9 @@ pub fn get_git_head(repo_path: &str) -> Option<String> {
     let content = std::fs::read_to_string(&head_file).ok()?;
     let trimmed = content.trim();
 
-    if trimmed.starts_with("ref: ") {
+    if let Some(stripped) = trimmed.strip_prefix("ref: ") {
         // Symbolic ref - read the actual hash
-        let ref_path = Path::new(repo_path).join(".git").join(&trimmed[5..]);
+        let ref_path = Path::new(repo_path).join(".git").join(stripped);
         std::fs::read_to_string(&ref_path)
             .ok()
             .map(|s| s.trim().to_string())
@@ -27,8 +27,8 @@ pub fn get_git_branch(repo_path: &str) -> Option<String> {
     let content = std::fs::read_to_string(&head_file).ok()?;
     let trimmed = content.trim();
 
-    if trimmed.starts_with("ref: refs/heads/") {
-        Some(trimmed[16..].to_string())
+    if let Some(stripped) = trimmed.strip_prefix("ref: refs/heads/") {
+        Some(stripped.to_string())
     } else {
         Some("detached".to_string())
     }

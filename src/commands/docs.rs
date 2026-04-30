@@ -202,7 +202,7 @@ pub async fn upload(path: &str, project: &str) {
 
     let client = reqwest::Client::new();
     let resp = match client
-        .post(&format!("{}/upload", API_BASE))
+        .post(format!("{}/upload", API_BASE))
         .header("Authorization", format!("Bearer {}", token))
         .json(&payload)
         .send()

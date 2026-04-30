@@ -108,6 +108,7 @@ impl CodeParser {
 
             if let Some(file_entities) = parsed {
                 // Extract call sites from function bodies
+                #[allow(clippy::regex_creation_in_loops)]
                 let call_re = regex::Regex::new(r"(\w+)\s*\(").unwrap();
                 let skip_keywords = [
                     "if", "for", "while", "return", "switch", "catch", "new", "typeof", "await",

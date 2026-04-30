@@ -19,7 +19,7 @@ pub async fn run() {
 
     let client = reqwest::Client::new();
     let resp = match client
-        .get(&format!("{}/api/v1/usage", CLOUD_ENDPOINT))
+        .get(format!("{}/api/v1/usage", CLOUD_ENDPOINT))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
