@@ -60,7 +60,7 @@ pub fn check_background() {
         {
             if let Ok(body) = response.text().await {
                 let latest = body.trim().to_string();
-                if !latest.is_empty() && latest.chars().next().map_or(false, |c| c.is_ascii_digit())
+                if !latest.is_empty() && latest.chars().next().is_some_and(|c| c.is_ascii_digit())
                 {
                     write_cache(&latest);
                     print_update_notice(&latest);

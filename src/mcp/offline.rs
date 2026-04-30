@@ -49,11 +49,7 @@ impl SessionStats {
             self.searches_performed * 8 + self.callers_found * 5 + self.usages_found * 5;
         let estimated_grep_tokens =
             self.searches_performed as u64 * 3000 + self.files_skeletonized as u64 * 2400;
-        let tokens_saved = if estimated_grep_tokens > self.total_tokens_returned {
-            estimated_grep_tokens - self.total_tokens_returned
-        } else {
-            0
-        };
+        let tokens_saved = estimated_grep_tokens.saturating_sub(self.total_tokens_returned);
         let time_saved_seconds = estimated_grep_calls as u64 * 5; // ~5s per grep+read cycle
 
         // ── Savants Efficiency Quotient (SEQ) ──
