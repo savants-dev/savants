@@ -65,7 +65,7 @@ pub async fn list() {
                 } else {
                     format!("{} ", description)
                 },
-                sections
+                versions
             );
         } else {
             println!(
