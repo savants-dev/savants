@@ -41,7 +41,10 @@ pub async fn list() {
 
     println!("{}", "Available documentation sources:".bold());
     for source in sources {
-        let name = source.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let name = source
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let description = source
             .get("description")
             .and_then(|v| v.as_str())
@@ -50,10 +53,7 @@ pub async fn list() {
             .get("status")
             .and_then(|v| v.as_str())
             .unwrap_or("planned");
-        let versions = source
-            .get("versions")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let versions = source.get("versions").and_then(|v| v.as_u64()).unwrap_or(0);
 
         if status != "planned" {
             println!(
@@ -138,10 +138,7 @@ pub async fn search(provider: &str, query: &str) {
             .and_then(|v| v.as_str())
             .unwrap_or("Untitled");
         let url = result.get("url").and_then(|v| v.as_str()).unwrap_or("");
-        let snippet = result
-            .get("snippet")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let snippet = result.get("snippet").and_then(|v| v.as_str()).unwrap_or("");
 
         println!("{}. {}", (i + 1).to_string().bold(), title.bold());
         if !url.is_empty() {

@@ -60,7 +60,8 @@ pub fn check_background() {
         {
             if let Ok(body) = response.text().await {
                 let latest = body.trim().to_string();
-                if !latest.is_empty() && latest.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                if !latest.is_empty() && latest.chars().next().map_or(false, |c| c.is_ascii_digit())
+                {
                     write_cache(&latest);
                     print_update_notice(&latest);
                 }
@@ -83,16 +84,18 @@ fn print_update_notice(latest: &str) {
 }
 
 fn is_newer(latest: &str, current: &str) -> bool {
-    let parse = |v: &str| -> Vec<u32> {
-        v.split('.').filter_map(|s| s.parse().ok()).collect()
-    };
+    let parse = |v: &str| -> Vec<u32> { v.split('.').filter_map(|s| s.parse().ok()).collect() };
     let l = parse(latest);
     let c = parse(current);
     for i in 0..3 {
         let lv = l.get(i).copied().unwrap_or(0);
         let cv = c.get(i).copied().unwrap_or(0);
-        if lv > cv { return true; }
-        if lv < cv { return false; }
+        if lv > cv {
+            return true;
+        }
+        if lv < cv {
+            return false;
+        }
     }
     false
 }

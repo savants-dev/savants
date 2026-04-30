@@ -114,12 +114,19 @@ impl SessionStats {
 
         let seq = precision + cost_efficiency + velocity;
 
-        let seq_label = if seq >= 90 { "Exceptional" }
-            else if seq >= 75 { "Excellent" }
-            else if seq >= 60 { "Good" }
-            else if seq >= 40 { "Moderate" }
-            else if seq > 0 { "Getting started" }
-            else { "No data yet" };
+        let seq_label = if seq >= 90 {
+            "Exceptional"
+        } else if seq >= 75 {
+            "Excellent"
+        } else if seq >= 60 {
+            "Good"
+        } else if seq >= 40 {
+            "Moderate"
+        } else if seq > 0 {
+            "Getting started"
+        } else {
+            "No data yet"
+        };
 
         json!({
             "seq": {

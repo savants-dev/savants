@@ -190,7 +190,9 @@ fn fix_stale_mcp_configs(current_config: &serde_json::Value) {
                 if mcp.exists() {
                     return Some(mcp);
                 }
-                if !d.pop() { break; }
+                if !d.pop() {
+                    break;
+                }
             }
             None
         }),
