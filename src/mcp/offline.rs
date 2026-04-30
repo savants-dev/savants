@@ -309,6 +309,26 @@ impl OfflineServer {
                 }, "required": ["repo_path"]}
             },
             {
+                "name": "git_blame",
+                "description": "WHEN WAS THIS BUG INTRODUCED? Given a file and line range, returns who wrote it, when, and the commit message. Use after finding a buggy line to trace its origin. FREE, runs locally.",
+                "inputSchema": {"type": "object", "properties": {
+                    "file": {"type": "string", "description": "File path relative to repo root"},
+                    "line_start": {"type": "integer", "description": "Start line number"},
+                    "line_end": {"type": "integer", "description": "End line number (defaults to line_start)"},
+                    "repo_path": {"type": "string", "description": "Path to repository (defaults to cwd)"}
+                }, "required": ["file", "line_start"]}
+            },
+            {
+                "name": "git_log",
+                "description": "RECENT CHANGES TO A FILE OR FUNCTION. Shows commit history with authors, dates, and messages. Use to understand how code evolved. FREE, runs locally.",
+                "inputSchema": {"type": "object", "properties": {
+                    "file": {"type": "string", "description": "File path (optional - omit for full repo history)"},
+                    "function_name": {"type": "string", "description": "Function name to trace (uses git log -L)"},
+                    "limit": {"type": "integer", "description": "Max commits (default 10)"},
+                    "repo_path": {"type": "string", "description": "Path to repository (defaults to cwd)"}
+                }}
+            },
+            {
                 "name": "session_stats",
                 "description": "SAVANTS EFFICIENCY QUOTIENT (SEQ): Your AI agent's context efficiency score (0-100). Measures precision (right result first try), cost (tokens saved vs grep), and velocity (response speed). Call this to see your score. Zero cost.",
                 "inputSchema": {"type": "object", "properties": {}}
@@ -328,6 +348,8 @@ impl OfflineServer {
             "where_used" => self.tool_where_used(args),
             "callers" => self.tool_callers(args),
             "reindex" => self.tool_reindex(args),
+            "git_blame" => self.tool_git_blame(args),
+            "git_log" => self.tool_git_log(args),
             _ => Err(format!(
                 "'{}' requires savants.cloud. Run: savants connect",
                 tool
@@ -615,7 +637,186 @@ impl OfflineServer {
         Ok(lines.join("\n"))
     }
 
+    fn tool_git_blame(&self, args: &Value) -> Result<String, String> {
+        let file = args.get("file").and_then(|v| v.as_str()).ok_or("file required")?;
+        let line_start = args.get("line_start").and_then(|v| v.as_i64()).ok_or("line_start required")?;
+        let line_end = args.get("line_end").and_then(|v| v.as_i64()).unwrap_or(line_start);
+        let repo_path = args.get("repo_path").and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default().to_string_lossy().to_string());
+
+        let output = std::process::Command::new("git")
+            .args([
+                "-C", &repo_path,
+                "blame", "--porcelain",
+                &format!("-L{},{}", line_start, line_end),
+                file,
+            ])
+            .output()
+            .map_err(|e| format!("git blame failed: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git blame error: {}", stderr.trim()));
+        }
+
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let mut results: Vec<String> = Vec::new();
+        let mut current_hash = String::new();
+        let mut author = String::new();
+        let mut date = String::new();
+        let mut summary = String::new();
+        let mut line_num = 0u64;
+
+        for line in raw.lines() {
+            if line.len() >= 40 && line.chars().take(40).all(|c| c.is_ascii_hexdigit()) {
+                // Commit line: hash orig_line final_line
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                current_hash = parts[0][..12].to_string();
+                if parts.len() >= 3 {
+                    line_num = parts[2].parse().unwrap_or(0);
+                }
+            } else if let Some(val) = line.strip_prefix("author ") {
+                author = val.to_string();
+            } else if let Some(val) = line.strip_prefix("author-time ") {
+                if let Ok(ts) = val.parse::<i64>() {
+                    let dt = chrono_format(ts);
+                    date = dt;
+                }
+            } else if let Some(val) = line.strip_prefix("summary ") {
+                summary = val.to_string();
+            } else if line.starts_with('\t') {
+                // Content line - emit the result
+                let code = &line[1..];
+                results.push(format!(
+                    "L{}: {} | {} ({}) | {}",
+                    line_num, current_hash, author, date, summary
+                ));
+                results.push(format!("    {}", code));
+            }
+        }
+
+        if results.is_empty() {
+            return Ok(format!("No blame data for {}:{}-{}", file, line_start, line_end));
+        }
+
+        let mut output_lines = vec![format!("=== git blame: {}:{}-{} ===", file, line_start, line_end)];
+        // Deduplicate consecutive same-commit lines
+        let mut seen_commits: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for line in &results {
+            if line.starts_with('L') {
+                let commit = line.split(' ').nth(1).unwrap_or("").to_string();
+                if !seen_commits.contains(&commit) {
+                    seen_commits.insert(commit);
+                    output_lines.push(line.clone());
+                }
+            } else {
+                output_lines.push(line.clone());
+            }
+        }
+
+        // Add commit details for deeper investigation
+        if let Some(first_hash) = results.first().and_then(|l| l.split(' ').nth(1)) {
+            let show = std::process::Command::new("git")
+                .args(["-C", &repo_path, "show", "--stat", "--oneline", first_hash])
+                .output();
+            if let Ok(show_out) = show {
+                if show_out.status.success() {
+                    let show_text = String::from_utf8_lossy(&show_out.stdout);
+                    output_lines.push(String::new());
+                    output_lines.push("=== Commit details ===".to_string());
+                    for l in show_text.lines().take(15) {
+                        output_lines.push(format!("  {}", l));
+                    }
+                }
+            }
+        }
+
+        Ok(output_lines.join("\n"))
+    }
+
+    fn tool_git_log(&self, args: &Value) -> Result<String, String> {
+        let file = args.get("file").and_then(|v| v.as_str());
+        let function_name = args.get("function_name").and_then(|v| v.as_str());
+        let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(10);
+        let repo_path = args.get("repo_path").and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default().to_string_lossy().to_string());
+
+        let mut cmd_args = vec![
+            "-C".to_string(), repo_path,
+            "log".to_string(),
+            format!("-{}", limit),
+            "--format=%h %ad %an | %s".to_string(),
+            "--date=short".to_string(),
+        ];
+
+        if let Some(fn_name) = function_name {
+            if let Some(f) = file {
+                // git log -L :funcname:file - shows function history
+                cmd_args.push(format!("-L:{}:{}", fn_name, f));
+            } else {
+                // Search for commits mentioning the function
+                cmd_args.push("-S".to_string());
+                cmd_args.push(fn_name.to_string());
+            }
+        } else if let Some(f) = file {
+            cmd_args.push("--".to_string());
+            cmd_args.push(f.to_string());
+        }
+
+        let output = std::process::Command::new("git")
+            .args(&cmd_args)
+            .output()
+            .map_err(|e| format!("git log failed: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("git log error: {}", stderr.trim()));
+        }
+
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let log_lines: Vec<&str> = raw.lines().take(limit as usize * 3).collect();
+
+        if log_lines.is_empty() {
+            let target = file.or(function_name).unwrap_or("repo");
+            return Ok(format!("No git history for '{}'", target));
+        }
+
+        let header = if let Some(fn_name) = function_name {
+            format!("=== git log: {} ===", fn_name)
+        } else if let Some(f) = file {
+            format!("=== git log: {} ===", f)
+        } else {
+            "=== git log ===".to_string()
+        };
+
+        let mut output_lines = vec![header];
+        for l in &log_lines {
+            output_lines.push(format!("  {}", l));
+        }
+        Ok(output_lines.join("\n"))
+    }
+
     fn response(&self, id: &Value, result: Value) -> Value {
         json!({"jsonrpc": "2.0", "id": id, "result": result})
     }
+}
+
+fn chrono_format(ts: i64) -> String {
+    // Simple unix timestamp to YYYY-MM-DD
+    let days = ts / 86400;
+    let y = 1970 + (days * 4 + 2) / 1461;
+    let doy = days - (365 * (y - 1970) + (y - 1969) / 4);
+    let months = [31, 28 + if y % 4 == 0 { 1 } else { 0 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m = 0;
+    let mut d = doy;
+    for days_in_month in &months {
+        if d < *days_in_month {
+            break;
+        }
+        d -= days_in_month;
+        m += 1;
+    }
+    format!("{}-{:02}-{:02}", y, m + 1, d + 1)
 }

@@ -117,6 +117,8 @@ impl CloudProxyServer {
                     "where_used",
                     "callers",
                     "session_stats",
+                    "git_blame",
+                    "git_log",
                 ];
                 if local_tools.contains(&tool_name) {
                     let offline = super::offline::OfflineServer::new();
