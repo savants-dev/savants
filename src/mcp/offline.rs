@@ -151,7 +151,7 @@ impl SessionStats {
                 "estimated_time_saved_seconds": time_saved_seconds,
             },
             "summary": format!(
-                "SEQ: {}/100 ({}). {} savants calls, ~{} tokens. Without savants: ~{} grep/read calls, ~{} tokens. Saved {}% tokens.",
+                "SEQ: {}/100 ({}). {} savants calls, ~{} tokens. Without savants: ~{} grep/read calls, ~{} tokens. Saved {}% tokens, ~{}s.",
                 seq, seq_label,
                 self.total_calls,
                 self.total_tokens_returned,
