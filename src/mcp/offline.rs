@@ -3,8 +3,90 @@
 
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
+use std::time::Instant;
 
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// Session statistics - tracks every tool call for ROI measurement.
+#[derive(Default)]
+struct SessionStats {
+    start_time: Option<Instant>,
+    total_calls: u32,
+    calls_by_tool: std::collections::HashMap<String, u32>,
+    total_tokens_returned: u64,
+    total_duration_ms: u64,
+    searches_performed: u32,
+    files_skeletonized: u32,
+    callers_found: u32,
+    usages_found: u32,
+}
+
+impl SessionStats {
+    fn record_call(&mut self, tool: &str, result_len: usize, duration_ms: u64) {
+        if self.start_time.is_none() {
+            self.start_time = Some(Instant::now());
+        }
+        self.total_calls += 1;
+        *self.calls_by_tool.entry(tool.to_string()).or_insert(0) += 1;
+        // Estimate tokens: ~4 chars per token
+        self.total_tokens_returned += (result_len / 4) as u64;
+        self.total_duration_ms += duration_ms;
+
+        match tool {
+            "semantic_search" => self.searches_performed += 1,
+            "file_skeleton" => self.files_skeletonized += 1,
+            "callers" => self.callers_found += 1,
+            "where_used" => self.usages_found += 1,
+            _ => {}
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        let session_seconds = self.start_time
+            .map(|s| s.elapsed().as_secs())
+            .unwrap_or(0);
+
+        // Estimate what grep/read would have cost
+        let estimated_grep_calls = self.searches_performed * 8 + self.callers_found * 5 + self.usages_found * 5;
+        let estimated_grep_tokens = self.searches_performed as u64 * 3000 + self.files_skeletonized as u64 * 2400;
+        let tokens_saved = if estimated_grep_tokens > self.total_tokens_returned {
+            estimated_grep_tokens - self.total_tokens_returned
+        } else {
+            0
+        };
+        let time_saved_seconds = estimated_grep_calls as u64 * 5; // ~5s per grep+read cycle
+
+        json!({
+            "session": {
+                "duration_seconds": session_seconds,
+                "total_tool_calls": self.total_calls,
+                "total_tokens_returned": self.total_tokens_returned,
+                "total_duration_ms": self.total_duration_ms,
+                "avg_response_ms": if self.total_calls > 0 { self.total_duration_ms / self.total_calls as u64 } else { 0 },
+            },
+            "by_tool": self.calls_by_tool,
+            "savings": {
+                "tokens_returned": self.total_tokens_returned,
+                "estimated_without_savants_tokens": estimated_grep_tokens,
+                "tokens_saved": tokens_saved,
+                "token_reduction_percent": if estimated_grep_tokens > 0 {
+                    ((tokens_saved as f64 / estimated_grep_tokens as f64) * 100.0) as u32
+                } else { 0 },
+                "estimated_grep_calls_avoided": estimated_grep_calls,
+                "estimated_time_saved_seconds": time_saved_seconds,
+            },
+            "summary": format!(
+                "This session: {} savants calls, ~{} tokens. Without savants: ~{} grep/read calls, ~{} tokens. Saved {}% tokens and ~{}s.",
+                self.total_calls,
+                self.total_tokens_returned,
+                estimated_grep_calls,
+                estimated_grep_tokens,
+                if estimated_grep_tokens > 0 { ((tokens_saved as f64 / estimated_grep_tokens as f64) * 100.0) as u32 } else { 0 },
+                time_saved_seconds
+            )
+        })
+    }
+}
 
 pub struct OfflineServer;
 
@@ -18,6 +100,7 @@ impl OfflineServer {
         eprintln!("Connect to savants.cloud for full intelligence tools: savants connect");
         let stdin = io::stdin();
         let stdout = io::stdout();
+        let mut stats = SessionStats::default();
         let reader = stdin.lock();
         let mut writer = stdout.lock();
 
@@ -34,7 +117,7 @@ impl OfflineServer {
                 Ok(v) => v,
                 Err(_) => continue,
             };
-            if let Some(response) = self.handle_message(&message) {
+            if let Some(response) = self.handle_message(&message, &mut stats) {
                 let body = serde_json::to_string(&response).unwrap();
                 let _ = writeln!(writer, "{}", body);
                 let _ = writer.flush();
@@ -42,7 +125,7 @@ impl OfflineServer {
         }
     }
 
-    fn handle_message(&self, message: &Value) -> Option<Value> {
+    fn handle_message(&self, message: &Value, stats: &mut SessionStats) -> Option<Value> {
         let method = message.get("method").and_then(|v| v.as_str()).unwrap_or("");
         let params = message.get("params").cloned().unwrap_or(json!({}));
         let req_id = message.get("id");
@@ -62,9 +145,23 @@ impl OfflineServer {
             "tools/call" => {
                 let tool = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
+
+                // Handle session_stats specially
+                if tool == "session_stats" {
+                    let stats_json = stats.to_json();
+                    let text = serde_json::to_string_pretty(&stats_json).unwrap_or_default();
+                    return Some(self.response(&req_id, json!({"content": [{"type": "text", "text": text}]})));
+                }
+
+                let start = Instant::now();
                 let result = self.call_tool(tool, &args);
+                let duration_ms = start.elapsed().as_millis() as u64;
+
                 match result {
-                    Ok(text) => Some(self.response(&req_id, json!({"content": [{"type": "text", "text": text}]}))),
+                    Ok(ref text) => {
+                        stats.record_call(tool, text.len(), duration_ms);
+                        Some(self.response(&req_id, json!({"content": [{"type": "text", "text": text}]})))
+                    },
                     Err(e) => Some(self.response(&req_id, json!({"content": [{"type": "text", "text": format!("Error: {}", e)}], "isError": true}))),
                 }
             }
@@ -115,6 +212,11 @@ impl OfflineServer {
                 "inputSchema": {"type": "object", "properties": {
                     "repo_path": {"type": "string", "description": "Absolute path to repository"}
                 }, "required": ["repo_path"]}
+            },
+            {
+                "name": "session_stats",
+                "description": "SESSION ANALYTICS: Shows how many tool calls, tokens used, and time saved vs grep/read in this session. Call this to see your ROI. Zero cost.",
+                "inputSchema": {"type": "object", "properties": {}}
             }
         ])
     }
