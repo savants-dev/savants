@@ -125,6 +125,7 @@ pub async fn run() {
     eprintln!("Timed out. Run {} again.", "savants connect".cyan());
 }
 
+#[allow(dead_code)]
 pub fn disconnect() {
     let mut state = State::load();
     state.cloud_token = None;

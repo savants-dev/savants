@@ -9,8 +9,8 @@
 //!
 //! No IP. Just vectors from a public model.
 
-use std::io::{Cursor, Read, Write};
-use std::path::{Path, PathBuf};
+use std::io::{Cursor, Read};
+use std::path::PathBuf;
 
 const MAGIC: &[u8; 4] = b"SVEC";
 const VERSION: u32 = 1;

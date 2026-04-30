@@ -14,6 +14,7 @@ use serde::Serialize;
 
 /// A search result with relevance score.
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct SearchResult {
     pub name: String,
     pub file: String,
@@ -34,7 +35,9 @@ pub struct IndexEntry {
     pub file: String,
     pub line: usize,
     pub kind: String,
+    #[allow(dead_code)]
     pub body_preview: String,
+    #[allow(dead_code)]
     pub embed_text: String,
 }
 
@@ -107,6 +110,7 @@ impl SemanticIndex {
     }
 
     /// Search by natural language query using embedding similarity.
+    #[allow(dead_code)]
     pub fn search(
         &self,
         query: &str,

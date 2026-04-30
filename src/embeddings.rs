@@ -67,6 +67,7 @@ impl EmbeddingEngine {
 }
 
 /// Cosine similarity between two embeddings.
+#[allow(dead_code)]
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() {
         return 0.0;
@@ -88,6 +89,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Reciprocal Rank Fusion: merge multiple ranked lists into one.
+#[allow(dead_code)]
 pub fn reciprocal_rank_fusion(ranked_lists: &[Vec<(String, usize)>], k: f32) -> Vec<(String, f32)> {
     let mut scores: HashMap<String, f32> = HashMap::new();
     for list in ranked_lists {
