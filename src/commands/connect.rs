@@ -95,20 +95,20 @@ pub async fn run() {
 
             println!();
             println!("  {} Connected to savants.cloud", "●".green());
+
+            // Auto-update all .mcp.json files with cloud URL
+            let mcp_config = serde_json::json!({
+                "command": crate::commands::mcp::find_savants_binary_pub(),
+                "args": ["serve"],
+                "env": {
+                    "SAVANTS_CLOUD_URL": CLOUD_ENDPOINT
+                }
+            });
+            update_all_mcp_configs(&mcp_config);
+
             println!();
-            println!("  Add to {} for MCP tools:", "~/.mcp.json".cyan());
-            println!("  {{");
-            println!("    \"mcpServers\": {{");
-            println!("      \"savants\": {{");
-            println!("        \"command\": \"savants\",");
-            println!("        \"args\": [\"serve\"],");
-            println!("        \"env\": {{");
-            println!("          \"SAVANTS_CLOUD_URL\": \"{}\",", CLOUD_ENDPOINT);
-            println!("          \"SAVANTS_API_KEY\": \"{}\"", access_token);
-            println!("        }}");
-            println!("      }}");
-            println!("    }}");
-            println!("  }}");
+            println!("  Restart Claude Code to use cloud tools.");
+            println!("  You now have: diagnose_error, pr_risk, radar, and more.");
             return;
         }
 

@@ -20,10 +20,21 @@ fn find_savants_binary() -> String {
 
 fn mcp_config_json() -> serde_json::Value {
     let bin = find_savants_binary();
-    json!({
+
+    // Include cloud URL if connected
+    let state = crate::config::State::load();
+    let mut config = json!({
         "command": bin,
         "args": ["serve"]
-    })
+    });
+
+    if state.is_cloud_authenticated() {
+        config["env"] = json!({
+            "SAVANTS_CLOUD_URL": "https://api.savants.cloud"
+        });
+    }
+
+    config
 }
 
 /// All savants MCP tool names (used for allowlist).
@@ -100,9 +111,21 @@ pub fn install(scope: &str, tool: &str) {
         return;
     }
 
-    // Default: .mcp.json in project root
+    // Write to project root AND home directory
     let config_path = PathBuf::from(".mcp.json");
     write_mcp_json(&config_path, &config);
+
+    // Also update ~/.mcp.json so it's consistent
+    if let Some(home) = dirs::home_dir() {
+        let home_mcp = home.join(".mcp.json");
+        if home_mcp != std::fs::canonicalize(&config_path).unwrap_or_default() {
+            write_mcp_json(&home_mcp, &config);
+        }
+    }
+
+    // Find and fix any other .mcp.json files that have savants without cloud URL
+    fix_stale_mcp_configs(&config);
+
     add_to_claude_allowlist();
 }
 
@@ -148,6 +171,66 @@ fn add_to_claude_allowlist() {
     let content = serde_json::to_string_pretty(&settings).unwrap() + "\n";
     if let Err(e) = fs::write(&settings_path, &content) {
         eprintln!("Warning: could not update Claude settings: {}", e);
+    }
+}
+
+/// Find .mcp.json files in common locations and ensure savants config is up to date.
+/// Prevents the scenario where a project-level .mcp.json overrides the home one
+/// with stale config (missing SAVANTS_CLOUD_URL, wrong binary path, etc.)
+fn fix_stale_mcp_configs(current_config: &serde_json::Value) {
+    let locations = [
+        // Home directory
+        dirs::home_dir().map(|h| h.join(".mcp.json")),
+        // Current directory
+        Some(PathBuf::from(".mcp.json")),
+        // Common git project roots (scan parent directories)
+        std::env::current_dir().ok().and_then(|mut d| {
+            for _ in 0..5 {
+                let mcp = d.join(".mcp.json");
+                if mcp.exists() {
+                    return Some(mcp);
+                }
+                if !d.pop() { break; }
+            }
+            None
+        }),
+    ];
+
+    for loc in locations.iter().flatten() {
+        if !loc.exists() { continue; }
+
+        let content = match fs::read_to_string(loc) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let mut config: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // Check if savants entry exists but is outdated
+        if let Some(servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+            if let Some(savants) = servers.get("savants") {
+                let has_cloud = savants.get("env")
+                    .and_then(|e| e.get("SAVANTS_CLOUD_URL"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
+
+                let current_has_cloud = current_config.get("env")
+                    .and_then(|e| e.get("SAVANTS_CLOUD_URL"))
+                    .is_some();
+
+                // Update if current config has cloud but this file doesn't
+                if current_has_cloud && !has_cloud {
+                    servers.insert("savants".to_string(), current_config.clone());
+                    let updated = serde_json::to_string_pretty(&config).unwrap() + "\n";
+                    let _ = fs::write(loc, &updated);
+                    println!("  Updated {} with cloud config", loc.display().to_string().cyan());
+                }
+            }
+        }
     }
 }
 

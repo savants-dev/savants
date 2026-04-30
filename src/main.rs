@@ -110,7 +110,15 @@ async fn main() {
         }
         Commands::Serve => {
             let cloud_url = std::env::var("SAVANTS_CLOUD_URL").ok();
-            let api_key = std::env::var("SAVANTS_API_KEY").unwrap_or_default();
+            let api_key = std::env::var("SAVANTS_API_KEY")
+                .ok()
+                .filter(|k| !k.is_empty())
+                .or_else(|| {
+                    // Fall back to JWT from state file (set by savants connect)
+                    let state = config::State::load();
+                    state.cloud_token.clone()
+                })
+                .unwrap_or_default();
 
             if let Some(url) = cloud_url {
                 let proxy = mcp::CloudProxyServer::new(&url, &api_key);
