@@ -55,12 +55,7 @@ enum Commands {
         #[command(subcommand)]
         action: DocsAction,
     },
-    /// Analyze Claude Code session - token usage, tool calls, savings
-    Benchmark {
-        /// Session ID (default: most recent session)
-        #[arg(long)]
-        session: Option<String>,
-    },
+
 }
 
 #[derive(Subcommand)]
@@ -152,9 +147,6 @@ async fn main() {
                 commands::docs::upload(&path, &project).await;
             }
         },
-        Commands::Benchmark { session } => {
-            commands::benchmark::run(session);
-        }
         Commands::Reindex { repo_path } => {
             let path = repo_path.unwrap_or_else(|| {
                 std::env::current_dir()

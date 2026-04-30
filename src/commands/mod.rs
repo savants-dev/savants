@@ -1,4 +1,3 @@
-pub mod benchmark;
 pub mod connect;
 pub mod docs;
 pub mod mcp;
