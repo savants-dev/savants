@@ -66,7 +66,7 @@ impl SemanticIndex {
                 .replace(".js", "")
                 .replace(".py", "")
                 .replace(".rs", "");
-            let file_context = entity.file, .replace(['/', '.'], " ");
+            let file_context = entity.file.replace(['/', '.'], " ");
             let params_text = entity.params.join(" ");
             let body_summary: String = entity.body.chars().take(100).collect();
 
