@@ -42,13 +42,13 @@ impl SessionStats {
     }
 
     fn to_json(&self) -> Value {
-        let session_seconds = self.start_time
-            .map(|s| s.elapsed().as_secs())
-            .unwrap_or(0);
+        let session_seconds = self.start_time.map(|s| s.elapsed().as_secs()).unwrap_or(0);
 
         // Estimate what grep/read would have cost
-        let estimated_grep_calls = self.searches_performed * 8 + self.callers_found * 5 + self.usages_found * 5;
-        let estimated_grep_tokens = self.searches_performed as u64 * 3000 + self.files_skeletonized as u64 * 2400;
+        let estimated_grep_calls =
+            self.searches_performed * 8 + self.callers_found * 5 + self.usages_found * 5;
+        let estimated_grep_tokens =
+            self.searches_performed as u64 * 3000 + self.files_skeletonized as u64 * 2400;
         let tokens_saved = if estimated_grep_tokens > self.total_tokens_returned {
             estimated_grep_tokens - self.total_tokens_returned
         } else {
@@ -92,25 +92,41 @@ impl SessionStats {
             // Proxy: more diverse tool usage = finding answers from different angles = good
             let unique_tools = self.calls_by_tool.len() as f64;
             let diversity = (unique_tools / 4.0).min(1.0); // 4 tools = max diversity
-            let first_call_hit = if self.searches_performed > 0 { 0.7 } else { 0.3 };
+            let first_call_hit = if self.searches_performed > 0 {
+                0.7
+            } else {
+                0.3
+            };
             ((first_call_hit + diversity * 0.3) * 40.0) as u32
-        } else { 0 };
+        } else {
+            0
+        };
 
         // Cost efficiency: 0-35
         let cost_efficiency = if estimated_grep_tokens > 0 && self.total_tokens_returned > 0 {
             let ratio = tokens_saved as f64 / estimated_grep_tokens as f64;
             (ratio * 35.0).min(35.0) as u32
-        } else { 0 };
+        } else {
+            0
+        };
 
         // Velocity: 0-25
         let velocity = if self.total_calls > 0 {
             let avg_ms = self.total_duration_ms / self.total_calls as u64;
-            if avg_ms < 300 { 25 }
-            else if avg_ms < 500 { 22 }
-            else if avg_ms < 1000 { 18 }
-            else if avg_ms < 2000 { 12 }
-            else { 5 }
-        } else { 0 };
+            if avg_ms < 300 {
+                25
+            } else if avg_ms < 500 {
+                22
+            } else if avg_ms < 1000 {
+                18
+            } else if avg_ms < 2000 {
+                12
+            } else {
+                5
+            }
+        } else {
+            0
+        };
 
         let seq = precision + cost_efficiency + velocity;
 

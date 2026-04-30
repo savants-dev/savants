@@ -199,7 +199,9 @@ fn fix_stale_mcp_configs(current_config: &serde_json::Value) {
     ];
 
     for loc in locations.iter().flatten() {
-        if !loc.exists() { continue; }
+        if !loc.exists() {
+            continue;
+        }
 
         let content = match fs::read_to_string(loc) {
             Ok(c) => c,
@@ -214,13 +216,15 @@ fn fix_stale_mcp_configs(current_config: &serde_json::Value) {
         // Check if savants entry exists but is outdated
         if let Some(servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
             if let Some(savants) = servers.get("savants") {
-                let has_cloud = savants.get("env")
+                let has_cloud = savants
+                    .get("env")
                     .and_then(|e| e.get("SAVANTS_CLOUD_URL"))
                     .and_then(|v| v.as_str())
                     .map(|s| !s.is_empty())
                     .unwrap_or(false);
 
-                let current_has_cloud = current_config.get("env")
+                let current_has_cloud = current_config
+                    .get("env")
                     .and_then(|e| e.get("SAVANTS_CLOUD_URL"))
                     .is_some();
 
@@ -229,7 +233,10 @@ fn fix_stale_mcp_configs(current_config: &serde_json::Value) {
                     servers.insert("savants".to_string(), current_config.clone());
                     let updated = serde_json::to_string_pretty(&config).unwrap() + "\n";
                     let _ = fs::write(loc, &updated);
-                    println!("  Updated {} with cloud config", loc.display().to_string().cyan());
+                    println!(
+                        "  Updated {} with cloud config",
+                        loc.display().to_string().cyan()
+                    );
                 }
             }
         }

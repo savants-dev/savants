@@ -55,7 +55,6 @@ enum Commands {
         #[command(subcommand)]
         action: DocsAction,
     },
-
 }
 
 #[derive(Subcommand)]
@@ -259,5 +258,3 @@ async fn main() {
         }
     }
 }
-
-
