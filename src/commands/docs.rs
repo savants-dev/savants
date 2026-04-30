@@ -31,7 +31,7 @@ pub async fn list() {
         }
     };
 
-    let sources = match body.as_array() {
+    let sources = match body.get("providers").and_then(|v| v.as_array()) {
         Some(arr) => arr,
         None => {
             eprintln!("{}: unexpected response format", "Error".red());
@@ -46,18 +46,18 @@ pub async fn list() {
             .get("description")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let indexed = source
-            .get("indexed")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let sections = source
-            .get("sections")
+        let status = source
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("planned");
+        let versions = source
+            .get("versions")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
 
-        if indexed {
+        if status != "planned" {
             println!(
-                "  {} {:<14}{}({} sections)",
+                "  {} {:<14}{}({} versions)",
                 "●".green(),
                 name.cyan(),
                 if description.is_empty() {
