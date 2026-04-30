@@ -1,12 +1,17 @@
 use colored::*;
+use crate::config::State;
 
 pub fn run() {
     println!("{}", "Savants Status".bold());
     println!();
 
-    // Cloud connection
-    if let Ok(url) = std::env::var("SAVANTS_CLOUD_URL") {
-        println!("  {} Cloud: {} (connected)", "●".green(), url.cyan());
+    // Cloud connection - check state file, not env var
+    let state = State::load();
+    if state.is_cloud_authenticated() {
+        let org = state.cloud_org.as_deref().unwrap_or("connected");
+        println!("  {} Cloud: {} (org: {})", "●".green(), "connected".green(), org.cyan());
+    } else if std::env::var("SAVANTS_CLOUD_URL").is_ok() {
+        println!("  {} Cloud: {} (cloud mode)", "●".green(), "api.savants.cloud".cyan());
     } else {
         println!("  {} Cloud: {}", "●".dimmed(), "not connected".dimmed());
         println!("    Run {} for team features.", "savants connect".cyan());
