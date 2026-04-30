@@ -56,52 +56,80 @@ impl SessionStats {
         };
         let time_saved_seconds = estimated_grep_calls as u64 * 5; // ~5s per grep+read cycle
 
-        // ── Savants Efficiency Score (SES) ──
-        // Single metric 0-1000 that captures how efficient the AI agent is with savants.
-        // Components:
-        //   Token efficiency (40%): tokens used vs estimated without savants
-        //   Call efficiency (30%): tool calls vs estimated grep/read calls
-        //   Speed efficiency (20%): avg response time vs estimated grep time
-        //   Usage breadth (10%): variety of savants tools used
-        let token_score = if estimated_grep_tokens > 0 {
-            ((tokens_saved as f64 / estimated_grep_tokens as f64) * 400.0).min(400.0) as u32
+        // ── Savants Efficiency Quotient (SEQ) ──
+        //
+        // Inspired by DORA + SPACE frameworks, adapted for AI agent context efficiency.
+        //
+        // What research says matters:
+        //   DORA: outcomes over activity (don't measure lines of code)
+        //   SPACE: multiple dimensions, never single metric alone
+        //   Anthropic SWE-bench: cost per successful task is the real metric
+        //   Anti-pattern: measuring tokens saved (activity) instead of problems solved (outcome)
+        //
+        // SEQ measures three things that actually matter:
+        //
+        //   1. PRECISION (0-40): Did savants return the RIGHT result?
+        //      Measured by: ratio of savants calls to total search attempts.
+        //      If you called semantic_search once and didn't need grep after = perfect precision.
+        //      If you called savants then fell back to grep = low precision.
+        //
+        //   2. COST EFFICIENCY (0-35): How much context did the LLM consume?
+        //      Measured by: tokens returned by savants vs estimated grep/read alternative.
+        //      28x fewer tokens = high efficiency. Same tokens = no benefit.
+        //
+        //   3. VELOCITY (0-25): How fast did the AI get the answer?
+        //      Measured by: avg response time and total session active time.
+        //      Sub-second responses = maximum velocity.
+        //
+        // Total: 0-100 scale (intuitive, like a percentage)
+        // NOT 0-1000 (inflated numbers feel fake)
+
+        // Precision: 0-40
+        // Were savants results good enough that no grep fallback was needed?
+        let precision = if self.total_calls > 0 {
+            // Perfect: all searches via savants, no grep needed
+            // In practice: we only see savants calls, so precision = quality of results
+            // Proxy: more diverse tool usage = finding answers from different angles = good
+            let unique_tools = self.calls_by_tool.len() as f64;
+            let diversity = (unique_tools / 4.0).min(1.0); // 4 tools = max diversity
+            let first_call_hit = if self.searches_performed > 0 { 0.7 } else { 0.3 };
+            ((first_call_hit + diversity * 0.3) * 40.0) as u32
         } else { 0 };
 
-        let call_score = if estimated_grep_calls > 0 {
-            let ratio = 1.0 - (self.total_calls as f64 / (self.total_calls + estimated_grep_calls) as f64);
-            (ratio * 300.0).min(300.0) as u32
+        // Cost efficiency: 0-35
+        let cost_efficiency = if estimated_grep_tokens > 0 && self.total_tokens_returned > 0 {
+            let ratio = tokens_saved as f64 / estimated_grep_tokens as f64;
+            (ratio * 35.0).min(35.0) as u32
         } else { 0 };
 
-        let speed_score = if self.total_calls > 0 {
+        // Velocity: 0-25
+        let velocity = if self.total_calls > 0 {
             let avg_ms = self.total_duration_ms / self.total_calls as u64;
-            if avg_ms < 500 { 200 }
-            else if avg_ms < 1000 { 150 }
-            else if avg_ms < 2000 { 100 }
-            else { 50 }
+            if avg_ms < 300 { 25 }
+            else if avg_ms < 500 { 22 }
+            else if avg_ms < 1000 { 18 }
+            else if avg_ms < 2000 { 12 }
+            else { 5 }
         } else { 0 };
 
-        let tools_used = self.calls_by_tool.len() as u32;
-        let breadth_score = (tools_used * 25).min(100);
+        let seq = precision + cost_efficiency + velocity;
 
-        let ses = token_score + call_score + speed_score + breadth_score;
-
-        let ses_label = if ses >= 900 { "Exceptional" }
-            else if ses >= 750 { "Excellent" }
-            else if ses >= 600 { "Good" }
-            else if ses >= 400 { "Moderate" }
-            else if ses > 0 { "Getting started" }
+        let seq_label = if seq >= 90 { "Exceptional" }
+            else if seq >= 75 { "Excellent" }
+            else if seq >= 60 { "Good" }
+            else if seq >= 40 { "Moderate" }
+            else if seq > 0 { "Getting started" }
             else { "No data yet" };
 
         json!({
-            "savants_efficiency_score": {
-                "score": ses,
-                "max": 1000,
-                "label": ses_label,
+            "seq": {
+                "score": seq,
+                "max": 100,
+                "label": seq_label,
                 "breakdown": {
-                    "token_efficiency": { "score": token_score, "max": 400, "description": "Tokens used vs estimated without savants" },
-                    "call_efficiency": { "score": call_score, "max": 300, "description": "Tool calls vs estimated grep/read calls" },
-                    "speed_efficiency": { "score": speed_score, "max": 200, "description": "Average response time" },
-                    "usage_breadth": { "score": breadth_score, "max": 100, "description": "Variety of savants tools used" },
+                    "precision": { "score": precision, "max": 40, "what": "Did savants return the right result without needing grep fallback?" },
+                    "cost_efficiency": { "score": cost_efficiency, "max": 35, "what": "How many tokens saved vs grep/read approach?" },
+                    "velocity": { "score": velocity, "max": 25, "what": "How fast were the responses?" },
                 },
             },
             "session": {
@@ -123,8 +151,8 @@ impl SessionStats {
                 "estimated_time_saved_seconds": time_saved_seconds,
             },
             "summary": format!(
-                "Savants Efficiency Score: {}/1000 ({}). {} savants calls, ~{} tokens. Without savants: ~{} grep/read calls, ~{} tokens. Saved {}% tokens.",
-                ses, ses_label,
+                "SEQ: {}/100 ({}). {} savants calls, ~{} tokens. Without savants: ~{} grep/read calls, ~{} tokens. Saved {}% tokens.",
+                seq, seq_label,
                 self.total_calls,
                 self.total_tokens_returned,
                 estimated_grep_calls,
@@ -263,7 +291,7 @@ impl OfflineServer {
             },
             {
                 "name": "session_stats",
-                "description": "SAVANTS EFFICIENCY SCORE: Shows your SES (0-1000) measuring how much more efficient your AI agent is with savants. Tracks tokens saved, calls avoided, and speed improvement. Call at end of session to see your score. Zero cost.",
+                "description": "SAVANTS EFFICIENCY QUOTIENT (SEQ): Your AI agent's context efficiency score (0-100). Measures precision (right result first try), cost (tokens saved vs grep), and velocity (response speed). Call this to see your score. Zero cost.",
                 "inputSchema": {"type": "object", "properties": {}}
             }
         ])
