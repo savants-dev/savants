@@ -118,7 +118,10 @@ impl CloudProxyServer {
                     let result = offline.call_tool_direct(tool_name, &arguments);
                     match result {
                         Ok(text) => {
-                            return Some(self.response(&req_id, json!({"content": [{"type": "text", "text": text}]})));
+                            return Some(self.response(
+                                &req_id,
+                                json!({"content": [{"type": "text", "text": text}]}),
+                            ));
                         }
                         Err(ref e) if !e.contains("requires savants.cloud") => {
                             // Local tool ran but hit an error - still return it
