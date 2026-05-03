@@ -342,6 +342,18 @@ impl OfflineServer {
     }
 
     fn call_tool(&self, tool: &str, args: &Value) -> Result<String, String> {
+        // Auto-index: if a tool needs the index and it doesn't exist, build it now
+        let needs_index = matches!(tool, "semantic_search" | "file_skeleton" | "where_used" | "callers");
+        if needs_index {
+            let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("unknown");
+            if !crate::embedding_store::EmbeddingStore::exists(repo) {
+                eprintln!("[savants] No index for '{}', auto-indexing...", repo);
+                if let Some(path) = self.detect_repo_path(repo) {
+                    let _ = self.do_reindex(&path);
+                }
+            }
+        }
+
         match tool {
             "semantic_search" => self.tool_semantic_search(args),
             "file_skeleton" => self.tool_file_skeleton(args),
@@ -355,6 +367,83 @@ impl OfflineServer {
                 tool
             )),
         }
+    }
+
+    /// Detect repo path: check cwd and parent dirs for a git repo matching the name
+    fn detect_repo_path(&self, repo: &str) -> Option<String> {
+        let cwd = std::env::current_dir().ok()?;
+
+        // If cwd is the repo or its name matches
+        if cwd.join(".git").exists() {
+            let cwd_name = cwd.file_name()?.to_string_lossy();
+            if cwd_name == repo || repo == "unknown" {
+                return Some(cwd.to_string_lossy().to_string());
+            }
+        }
+
+        // Check if repo is a subdirectory
+        let sub = cwd.join(repo);
+        if sub.join(".git").exists() {
+            return Some(sub.to_string_lossy().to_string());
+        }
+
+        // Fallback: use cwd if it's a git repo
+        if cwd.join(".git").exists() {
+            return Some(cwd.to_string_lossy().to_string());
+        }
+
+        None
+    }
+
+    /// Core reindex logic shared by auto-index and explicit reindex tool
+    fn do_reindex(&self, repo_path: &str) -> Result<String, String> {
+        let repo_name = std::path::Path::new(repo_path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let mut parser = crate::code_parser::CodeParser::new(&repo_name);
+        let result = parser.parse_repo(repo_path);
+
+        let ci = crate::call_index::CallIndex::from_parse_result(&result);
+        let _ = ci.save(&repo_name);
+
+        if let Some(head) = crate::freshness::get_git_head(repo_path) {
+            let branch = crate::freshness::get_git_branch(repo_path)
+                .unwrap_or_else(|| "unknown".to_string());
+            crate::freshness::save_state(&repo_name, &head, &branch);
+        }
+
+        let mut engine = crate::embeddings::EmbeddingEngine::new()?;
+        let index = crate::semantic_search::SemanticIndex::from_parse_result(&result, &mut engine)?;
+
+        let dim = engine
+            .embed_one("test")
+            .map(|v| v.len() as u32)
+            .unwrap_or(128);
+        let mut store = crate::embedding_store::EmbeddingStore::new(dim);
+        for (entry, emb) in index.entries_with_embeddings() {
+            let kind = match entry.kind.as_str() {
+                "class" => 1,
+                "interface" => 2,
+                _ => 0,
+            };
+            store.add(
+                &entry.name,
+                &entry.file,
+                entry.line as u32,
+                kind,
+                emb.clone(),
+            );
+        }
+        store.save(&repo_name)?;
+
+        let msg = format!(
+            "Indexed {}: {} files, {} entities",
+            repo_name, result.files, store.entries.len()
+        );
+        eprintln!("[savants] {}", msg);
+        Ok(msg)
     }
 
     fn tool_semantic_search(&self, args: &Value) -> Result<String, String> {
@@ -463,45 +552,89 @@ impl OfflineServer {
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
 
-        if !crate::embedding_store::EmbeddingStore::exists(repo) {
-            return Ok(format!("No index for '{}'. Run: savants reindex", repo));
-        }
+        // Try index first
+        if crate::embedding_store::EmbeddingStore::exists(repo) {
+            let store = crate::embedding_store::EmbeddingStore::load(repo)?;
+            let mut functions = vec![];
+            let mut classes = vec![];
 
-        let store = crate::embedding_store::EmbeddingStore::load(repo)?;
-        let mut functions = vec![];
-        let mut classes = vec![];
-
-        for entry in &store.entries {
-            if entry.file == file {
-                match entry.kind {
-                    0 => functions.push(entry),
-                    1 => classes.push(entry),
-                    _ => {}
+            for entry in &store.entries {
+                if entry.file == file {
+                    match entry.kind {
+                        0 => functions.push(entry),
+                        1 => classes.push(entry),
+                        _ => {}
+                    }
                 }
             }
-        }
 
-        if functions.is_empty() && classes.is_empty() {
-            return Ok(format!(
-                "No entities in '{}'. Is the file path correct?",
-                file
-            ));
-        }
-
-        let mut lines = vec![format!("=== {} ===", file)];
-        if !classes.is_empty() {
-            lines.push("Classes:".to_string());
-            for c in &classes {
-                lines.push(format!("  {} (line {})", c.name, c.line));
+            if !functions.is_empty() || !classes.is_empty() {
+                let mut lines = vec![format!("=== {} ===", file)];
+                if !classes.is_empty() {
+                    lines.push("Classes:".to_string());
+                    for c in &classes {
+                        lines.push(format!("  {} (line {})", c.name, c.line));
+                    }
+                }
+                if !functions.is_empty() {
+                    lines.push("Functions:".to_string());
+                    for f in &functions {
+                        lines.push(format!("  {}() (line {})", f.name, f.line));
+                    }
+                }
+                return Ok(lines.join("\n"));
             }
         }
-        if !functions.is_empty() {
-            lines.push("Functions:".to_string());
-            for f in &functions {
-                lines.push(format!("  {}() (line {})", f.name, f.line));
+
+        // Fallback: parse the file directly from filesystem
+        let file_path = self.resolve_file_path(file);
+        if !std::path::Path::new(&file_path).exists() {
+            return Err(format!("File not found: {}", file));
+        }
+
+        let content = std::fs::read_to_string(&file_path)
+            .map_err(|e| format!("Cannot read {}: {}", file, e))?;
+
+        let mut lines = vec![format!("=== {} (live parse) ===", file)];
+        let mut line_num = 0;
+        for line in content.lines() {
+            line_num += 1;
+            let trimmed = line.trim();
+            // Match function/class/interface/type definitions
+            if trimmed.starts_with("export ") || trimmed.starts_with("pub ") ||
+               trimmed.starts_with("function ") || trimmed.starts_with("class ") ||
+               trimmed.starts_with("interface ") || trimmed.starts_with("type ") ||
+               trimmed.starts_with("async function ") || trimmed.starts_with("def ") ||
+               trimmed.starts_with("fn ") || trimmed.starts_with("const ") && trimmed.contains("=>") ||
+               trimmed.starts_with("async ") && trimmed.contains("(") {
+                // Extract just the signature, not the body
+                let sig = if let Some(brace) = trimmed.find('{') {
+                    &trimmed[..brace]
+                } else {
+                    trimmed
+                };
+                lines.push(format!("  L{}: {}", line_num, sig.trim()));
             }
         }
+
+        if lines.len() == 1 {
+            lines.push("  (no functions/classes detected)".to_string());
+        }
+
         Ok(lines.join("\n"))
+    }
+
+    /// Resolve a relative file path to an absolute path
+    fn resolve_file_path(&self, file: &str) -> String {
+        let cwd = std::env::current_dir()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if std::path::Path::new(file).is_absolute() {
+            file.to_string()
+        } else {
+            format!("{}/{}", cwd, file)
+        }
     }
 
     fn tool_reindex(&self, args: &Value) -> Result<String, String> {
@@ -514,55 +647,7 @@ impl OfflineServer {
             return Err(format!("Not a directory: {}", repo_path));
         }
 
-        let repo_name = std::path::Path::new(repo_path)
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-
-        let mut parser = crate::code_parser::CodeParser::new(&repo_name);
-        let result = parser.parse_repo(repo_path);
-
-        // Save call index
-        let ci = crate::call_index::CallIndex::from_parse_result(&result);
-        let _ = ci.save(&repo_name);
-
-        // Save freshness state (git HEAD + branch)
-        if let Some(head) = crate::freshness::get_git_head(repo_path) {
-            let branch = crate::freshness::get_git_branch(repo_path)
-                .unwrap_or_else(|| "unknown".to_string());
-            crate::freshness::save_state(&repo_name, &head, &branch);
-        }
-
-        let mut engine = crate::embeddings::EmbeddingEngine::new()?;
-        let index = crate::semantic_search::SemanticIndex::from_parse_result(&result, &mut engine)?;
-
-        let dim = engine
-            .embed_one("test")
-            .map(|v| v.len() as u32)
-            .unwrap_or(128);
-        let mut store = crate::embedding_store::EmbeddingStore::new(dim);
-        for (entry, emb) in index.entries_with_embeddings() {
-            let kind = match entry.kind.as_str() {
-                "class" => 1,
-                "interface" => 2,
-                _ => 0,
-            };
-            store.add(
-                &entry.name,
-                &entry.file,
-                entry.line as u32,
-                kind,
-                emb.clone(),
-            );
-        }
-        store.save(&repo_name)?;
-
-        Ok(format!(
-            "Indexed {}: {} files, {} entities. Cached for instant search.",
-            repo_name,
-            result.files,
-            store.entries.len()
-        ))
+        self.do_reindex(repo_path)
     }
 
     fn tool_where_used(&self, args: &Value) -> Result<String, String> {
