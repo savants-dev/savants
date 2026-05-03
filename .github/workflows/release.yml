@@ -102,11 +102,13 @@ jobs:
 
       - name: Build
         run: |
-          FEATURES=""
           if [[ "${{ matrix.target }}" == *musl* ]]; then
-            FEATURES="--features vendored-openssl"
+            # musl: no ONNX prebuilts available, build without embeddings
+            # Semantic search uses n-gram fallback, downloads ONNX model at first use
+            cargo build --release --target ${{ matrix.target }} --no-default-features --features vendored-openssl
+          else
+            cargo build --release --target ${{ matrix.target }}
           fi
-          cargo build --release --target ${{ matrix.target }} $FEATURES
 
       - name: Package
         run: |
