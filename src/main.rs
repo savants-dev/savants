@@ -23,7 +23,7 @@ mod update_check;
 #[command(
     about = "The context engine for your LLM. Semantic search, code intelligence, MCP tools."
 )]
-#[command(version)]
+#[command(version = env!("SAVANTS_VERSION"))]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

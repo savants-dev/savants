@@ -45,7 +45,7 @@ pub fn send(tool: &str, duration_ms: u64) {
         "ms": duration_ms,
         "os": os,
         "arch": arch,
-        "v": env!("CARGO_PKG_VERSION"),
+        "v": env!("SAVANTS_VERSION"),
     });
 
     // Fire and forget in a background thread - never block tool calls

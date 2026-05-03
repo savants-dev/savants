@@ -83,12 +83,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Set version from tag
+      - name: Create git tag for build.rs version detection
         run: |
-          VERSION="${{ needs.version.outputs.version }}"
-          sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-          rm -f Cargo.toml.bak
-          grep "^version" Cargo.toml
+          TAG="${{ needs.version.outputs.tag }}"
+          git tag "$TAG" 2>/dev/null || true
+          echo "Tagged: $(git describe --tags --abbrev=0)"
 
       - name: Install OpenSSL (Linux)
         if: runner.os == 'Linux'
