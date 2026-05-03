@@ -116,6 +116,8 @@ impl CloudProxyServer {
                     "file_skeleton",
                     "where_used",
                     "callers",
+                    "blast_radius",
+                    "dead_code",
                     "session_stats",
                     "git_blame",
                     "git_log",

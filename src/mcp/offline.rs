@@ -306,6 +306,23 @@ impl OfflineServer {
                 }, "required": ["function"]}
             },
             {
+                "name": "blast_radius",
+                "description": "Use BEFORE changing a function. Shows every function that directly or transitively depends on it - what breaks if you change this. Uses the local call index. Essential for safe refactoring.",
+                "inputSchema": {"type": "object", "properties": {
+                    "function": {"type": "string", "description": "Function name to analyze"},
+                    "repo": {"type": "string", "description": "Repository name (auto-detected from cwd if omitted)"},
+                    "depth": {"type": "integer", "description": "Max traversal depth (default 5)"}
+                }, "required": ["function"]}
+            },
+            {
+                "name": "dead_code",
+                "description": "Find functions with zero callers in the codebase - candidates for removal. Uses the local call index. Essential for cleanup during refactoring.",
+                "inputSchema": {"type": "object", "properties": {
+                    "repo": {"type": "string", "description": "Repository name (auto-detected from cwd if omitted)"},
+                    "file": {"type": "string", "description": "Limit to a specific file (optional)"}
+                }}
+            },
+            {
                 "name": "reindex",
                 "description": "Rebuild the code index for a repository. Usually not needed - indexing happens automatically on first tool use. Use this to force a refresh after major changes.",
                 "inputSchema": {"type": "object", "properties": {
@@ -347,7 +364,7 @@ impl OfflineServer {
 
     fn call_tool(&self, tool: &str, args: &Value) -> Result<String, String> {
         // Auto-index: if a tool needs the index and it doesn't exist, build it now
-        let needs_index = matches!(tool, "semantic_search" | "file_skeleton" | "where_used" | "callers");
+        let needs_index = matches!(tool, "semantic_search" | "file_skeleton" | "where_used" | "callers" | "blast_radius" | "dead_code");
         if needs_index {
             let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("unknown");
             if !crate::embedding_store::EmbeddingStore::exists(repo) {
@@ -364,6 +381,8 @@ impl OfflineServer {
             "where_used" => self.tool_where_used(args),
             "callers" => self.tool_callers(args),
             "reindex" => self.tool_reindex(args),
+            "blast_radius" => self.tool_blast_radius(args),
+            "dead_code" => self.tool_dead_code(args),
             "git_blame" => self.tool_git_blame(args),
             "git_log" => self.tool_git_log(args),
             _ => Err(format!(
@@ -723,6 +742,129 @@ impl OfflineServer {
         for c in &callers {
             lines.push(format!("  {} ({})", c.name, c.file));
         }
+        Ok(lines.join("\n"))
+    }
+
+    fn tool_blast_radius(&self, args: &Value) -> Result<String, String> {
+        let function = args.get("function").and_then(|v| v.as_str()).ok_or("function required")?;
+        let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let max_depth = args.get("depth").and_then(|v| v.as_i64()).unwrap_or(5) as usize;
+
+        if !crate::call_index::CallIndex::exists(repo) {
+            return Ok(format!("No index for '{}'. Auto-indexing should have run - try calling semantic_search first.", repo));
+        }
+
+        let ci = crate::call_index::CallIndex::load(repo)?;
+
+        // BFS: find all transitive callers
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        let mut results: Vec<(String, String, usize)> = Vec::new(); // (name, file, depth)
+
+        visited.insert(function.to_string());
+        queue.push_back((function.to_string(), 0usize));
+
+        while let Some((current, depth)) = queue.pop_front() {
+            if depth >= max_depth { continue; }
+
+            if let Some(callers) = ci.callers.get(&current) {
+                for caller in callers {
+                    if !visited.contains(&caller.name) {
+                        visited.insert(caller.name.clone());
+                        results.push((caller.name.clone(), caller.file.clone(), depth + 1));
+                        queue.push_back((caller.name.clone(), depth + 1));
+                    }
+                }
+            }
+        }
+
+        let affected_files: std::collections::HashSet<&str> = results.iter().map(|(_, f, _)| f.as_str()).collect();
+
+        let mut lines = vec![format!(
+            "=== Blast radius: {} ===\n{} functions affected across {} files (max depth {})",
+            function, results.len(), affected_files.len(), max_depth
+        )];
+
+        if results.is_empty() {
+            lines.push(format!("\nNo callers found for '{}'. Safe to modify - nothing depends on it.", function));
+        } else {
+            let risk = if results.len() > 20 { "HIGH" } else if results.len() > 5 { "MEDIUM" } else { "LOW" };
+            lines.push(format!("Risk: {}\n", risk));
+
+            // Group by depth
+            for d in 1..=max_depth {
+                let at_depth: Vec<&(String, String, usize)> = results.iter().filter(|(_, _, depth)| *depth == d).collect();
+                if !at_depth.is_empty() {
+                    lines.push(format!("Depth {} ({} functions):", d, at_depth.len()));
+                    for (name, file, _) in &at_depth {
+                        lines.push(format!("  {}() in {}", name, file));
+                    }
+                }
+            }
+        }
+
+        Ok(lines.join("\n"))
+    }
+
+    fn tool_dead_code(&self, args: &Value) -> Result<String, String> {
+        let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let file_filter = args.get("file").and_then(|v| v.as_str());
+
+        if !crate::call_index::CallIndex::exists(repo) {
+            return Ok(format!("No index for '{}'. Auto-indexing should have run - try calling semantic_search first.", repo));
+        }
+
+        let ci = crate::call_index::CallIndex::load(repo)?;
+
+        let mut dead: Vec<&crate::call_index::FuncRef> = Vec::new();
+
+        for func in &ci.functions {
+            // Skip if file filter doesn't match
+            if let Some(filter) = file_filter {
+                if !func.file.contains(filter) { continue; }
+            }
+
+            // Skip common entry points / lifecycle functions
+            let skip_names = ["main", "default", "setup", "teardown", "init", "constructor",
+                            "render", "mount", "unmount", "componentDidMount", "useEffect"];
+            if skip_names.contains(&func.name.as_str()) { continue; }
+
+            // Check if anything calls this function
+            let has_callers = ci.callers.get(&func.name).map(|c| !c.is_empty()).unwrap_or(false);
+            let has_importers = ci.importers.get(&func.name).map(|i| !i.is_empty()).unwrap_or(false);
+
+            if !has_callers && !has_importers {
+                dead.push(func);
+            }
+        }
+
+        let mut lines = vec![format!(
+            "=== Dead code candidates{} ===\n{} functions with zero callers",
+            file_filter.map(|f| format!(" in {}", f)).unwrap_or_default(),
+            dead.len()
+        )];
+
+        if dead.is_empty() {
+            lines.push("\nNo dead code found. All functions have at least one caller or importer.".to_string());
+        } else {
+            // Group by file
+            let mut by_file: std::collections::HashMap<&str, Vec<&crate::call_index::FuncRef>> = std::collections::HashMap::new();
+            for func in &dead {
+                by_file.entry(&func.file).or_default().push(func);
+            }
+
+            let mut files: Vec<&&str> = by_file.keys().collect();
+            files.sort();
+            for file in files {
+                let funcs = &by_file[file];
+                lines.push(format!("\n{}:", file));
+                for f in funcs {
+                    lines.push(format!("  {}() (line {})", f.name, f.line));
+                }
+            }
+            lines.push("\nNote: exported functions may be used externally. Review before removing.".to_string());
+        }
+
         Ok(lines.join("\n"))
     }
 
