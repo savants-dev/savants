@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 pub struct State {
     pub cloud_token: Option<String>,
     pub cloud_org: Option<String>,
+    /// Opt-in anonymous usage telemetry. Set by `savants telemetry on/off`.
+    #[serde(default)]
+    pub telemetry_enabled: bool,
+    /// Stable anonymous device ID (generated on first opt-in, never changes).
+    pub telemetry_id: Option<String>,
 }
 
 impl State {

@@ -15,6 +15,7 @@ mod embeddings;
 mod freshness;
 mod mcp;
 mod semantic_search;
+mod telemetry;
 mod update_check;
 
 #[derive(Parser)]
@@ -54,6 +55,11 @@ enum Commands {
     Docs {
         #[command(subcommand)]
         action: DocsAction,
+    },
+    /// Manage anonymous usage telemetry (opt-in)
+    Telemetry {
+        /// on, off, or status
+        action: String,
     },
 }
 
@@ -111,15 +117,13 @@ async fn main() {
             let state = config::State::load();
 
             // Auto-detect cloud mode: if user ran `savants connect`, use cloud proxy
-            let cloud_url = std::env::var("SAVANTS_CLOUD_URL")
-                .ok()
-                .or_else(|| {
-                    if state.cloud_token.is_some() {
-                        Some("https://api.savants.cloud".to_string())
-                    } else {
-                        None
-                    }
-                });
+            let cloud_url = std::env::var("SAVANTS_CLOUD_URL").ok().or_else(|| {
+                if state.cloud_token.is_some() {
+                    Some("https://api.savants.cloud".to_string())
+                } else {
+                    None
+                }
+            });
 
             let api_key = std::env::var("SAVANTS_API_KEY")
                 .ok()
@@ -162,6 +166,11 @@ async fn main() {
             DocsAction::Upload { path, project } => {
                 commands::docs::upload(&path, &project).await;
             }
+        },
+        Commands::Telemetry { action } => match action.as_str() {
+            "on" => telemetry::enable(),
+            "off" => telemetry::disable(),
+            _ => telemetry::status(),
         },
         Commands::Reindex { repo_path } => {
             let path = repo_path.unwrap_or_else(|| {

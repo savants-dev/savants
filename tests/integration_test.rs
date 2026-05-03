@@ -211,9 +211,13 @@ fn test_file_skeleton_no_index() {
     );
     let response = mcp_call(&msg);
     let text = parse_result_text(&response);
+    // file_skeleton now falls back to live filesystem parsing when no index exists
     assert!(
-        text.contains("No index") || text.contains("Run"),
-        "Expected no-index message, got: {}",
+        text.contains("No index")
+            || text.contains("Run")
+            || text.contains("live parse")
+            || text.contains("==="),
+        "Expected file skeleton output or no-index message, got: {}",
         text
     );
 }

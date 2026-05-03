@@ -221,10 +221,7 @@ fn fix_stale_mcp_configs(current_config: &serde_json::Value) {
                     servers.insert("savants".to_string(), current_config.clone());
                     let updated = serde_json::to_string_pretty(&config).unwrap() + "\n";
                     let _ = fs::write(loc, &updated);
-                    println!(
-                        "  Updated {}",
-                        loc.display().to_string().cyan()
-                    );
+                    println!("  Updated {}", loc.display().to_string().cyan());
                 }
             }
         }

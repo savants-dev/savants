@@ -252,6 +252,9 @@ impl OfflineServer {
                 let result = self.call_tool(tool, &args);
                 let duration_ms = start.elapsed().as_millis() as u64;
 
+                // Opt-in telemetry: tool name + duration only
+                crate::telemetry::send(tool, duration_ms);
+
                 match result {
                     Ok(ref text) => {
                         stats.record_call(tool, text.len(), duration_ms);
@@ -364,9 +367,20 @@ impl OfflineServer {
 
     fn call_tool(&self, tool: &str, args: &Value) -> Result<String, String> {
         // Auto-index: if a tool needs the index and it doesn't exist, build it now
-        let needs_index = matches!(tool, "semantic_search" | "file_skeleton" | "where_used" | "callers" | "blast_radius" | "dead_code");
+        let needs_index = matches!(
+            tool,
+            "semantic_search"
+                | "file_skeleton"
+                | "where_used"
+                | "callers"
+                | "blast_radius"
+                | "dead_code"
+        );
         if needs_index {
-            let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let repo = args
+                .get("repo")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             if !crate::embedding_store::EmbeddingStore::exists(repo) {
                 eprintln!("[savants] No index for '{}', auto-indexing...", repo);
                 if let Some(path) = self.detect_repo_path(repo) {
@@ -463,7 +477,9 @@ impl OfflineServer {
 
         let msg = format!(
             "Indexed {}: {} files, {} entities",
-            repo_name, result.files, store.entries.len()
+            repo_name,
+            result.files,
+            store.entries.len()
         );
         eprintln!("[savants] {}", msg);
         Ok(msg)
@@ -624,12 +640,18 @@ impl OfflineServer {
             line_num += 1;
             let trimmed = line.trim();
             // Match function/class/interface/type definitions
-            if trimmed.starts_with("export ") || trimmed.starts_with("pub ") ||
-               trimmed.starts_with("function ") || trimmed.starts_with("class ") ||
-               trimmed.starts_with("interface ") || trimmed.starts_with("type ") ||
-               trimmed.starts_with("async function ") || trimmed.starts_with("def ") ||
-               trimmed.starts_with("fn ") || trimmed.starts_with("const ") && trimmed.contains("=>") ||
-               trimmed.starts_with("async ") && trimmed.contains("(") {
+            if trimmed.starts_with("export ")
+                || trimmed.starts_with("pub ")
+                || trimmed.starts_with("function ")
+                || trimmed.starts_with("class ")
+                || trimmed.starts_with("interface ")
+                || trimmed.starts_with("type ")
+                || trimmed.starts_with("async function ")
+                || trimmed.starts_with("def ")
+                || trimmed.starts_with("fn ")
+                || trimmed.starts_with("const ") && trimmed.contains("=>")
+                || trimmed.starts_with("async ") && trimmed.contains("(")
+            {
                 // Extract just the signature, not the body
                 let sig = if let Some(brace) = trimmed.find('{') {
                     &trimmed[..brace]
@@ -746,8 +768,14 @@ impl OfflineServer {
     }
 
     fn tool_blast_radius(&self, args: &Value) -> Result<String, String> {
-        let function = args.get("function").and_then(|v| v.as_str()).ok_or("function required")?;
-        let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let function = args
+            .get("function")
+            .and_then(|v| v.as_str())
+            .ok_or("function required")?;
+        let repo = args
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let max_depth = args.get("depth").and_then(|v| v.as_i64()).unwrap_or(5) as usize;
 
         if !crate::call_index::CallIndex::exists(repo) {
@@ -765,7 +793,9 @@ impl OfflineServer {
         queue.push_back((function.to_string(), 0usize));
 
         while let Some((current, depth)) = queue.pop_front() {
-            if depth >= max_depth { continue; }
+            if depth >= max_depth {
+                continue;
+            }
 
             if let Some(callers) = ci.callers.get(&current) {
                 for caller in callers {
@@ -778,22 +808,36 @@ impl OfflineServer {
             }
         }
 
-        let affected_files: std::collections::HashSet<&str> = results.iter().map(|(_, f, _)| f.as_str()).collect();
+        let affected_files: std::collections::HashSet<&str> =
+            results.iter().map(|(_, f, _)| f.as_str()).collect();
 
         let mut lines = vec![format!(
             "=== Blast radius: {} ===\n{} functions affected across {} files (max depth {})",
-            function, results.len(), affected_files.len(), max_depth
+            function,
+            results.len(),
+            affected_files.len(),
+            max_depth
         )];
 
         if results.is_empty() {
-            lines.push(format!("\nNo callers found for '{}'. Safe to modify - nothing depends on it.", function));
+            lines.push(format!(
+                "\nNo callers found for '{}'. Safe to modify - nothing depends on it.",
+                function
+            ));
         } else {
-            let risk = if results.len() > 20 { "HIGH" } else if results.len() > 5 { "MEDIUM" } else { "LOW" };
+            let risk = if results.len() > 20 {
+                "HIGH"
+            } else if results.len() > 5 {
+                "MEDIUM"
+            } else {
+                "LOW"
+            };
             lines.push(format!("Risk: {}\n", risk));
 
             // Group by depth
             for d in 1..=max_depth {
-                let at_depth: Vec<&(String, String, usize)> = results.iter().filter(|(_, _, depth)| *depth == d).collect();
+                let at_depth: Vec<&(String, String, usize)> =
+                    results.iter().filter(|(_, _, depth)| *depth == d).collect();
                 if !at_depth.is_empty() {
                     lines.push(format!("Depth {} ({} functions):", d, at_depth.len()));
                     for (name, file, _) in &at_depth {
@@ -807,7 +851,10 @@ impl OfflineServer {
     }
 
     fn tool_dead_code(&self, args: &Value) -> Result<String, String> {
-        let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let repo = args
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         let file_filter = args.get("file").and_then(|v| v.as_str());
 
         if !crate::call_index::CallIndex::exists(repo) {
@@ -821,17 +868,40 @@ impl OfflineServer {
         for func in &ci.functions {
             // Skip if file filter doesn't match
             if let Some(filter) = file_filter {
-                if !func.file.contains(filter) { continue; }
+                if !func.file.contains(filter) {
+                    continue;
+                }
             }
 
             // Skip common entry points / lifecycle functions
-            let skip_names = ["main", "default", "setup", "teardown", "init", "constructor",
-                            "render", "mount", "unmount", "componentDidMount", "useEffect"];
-            if skip_names.contains(&func.name.as_str()) { continue; }
+            let skip_names = [
+                "main",
+                "default",
+                "setup",
+                "teardown",
+                "init",
+                "constructor",
+                "render",
+                "mount",
+                "unmount",
+                "componentDidMount",
+                "useEffect",
+            ];
+            if skip_names.contains(&func.name.as_str()) {
+                continue;
+            }
 
             // Check if anything calls this function
-            let has_callers = ci.callers.get(&func.name).map(|c| !c.is_empty()).unwrap_or(false);
-            let has_importers = ci.importers.get(&func.name).map(|i| !i.is_empty()).unwrap_or(false);
+            let has_callers = ci
+                .callers
+                .get(&func.name)
+                .map(|c| !c.is_empty())
+                .unwrap_or(false);
+            let has_importers = ci
+                .importers
+                .get(&func.name)
+                .map(|i| !i.is_empty())
+                .unwrap_or(false);
 
             if !has_callers && !has_importers {
                 dead.push(func);
@@ -840,15 +910,21 @@ impl OfflineServer {
 
         let mut lines = vec![format!(
             "=== Dead code candidates{} ===\n{} functions with zero callers",
-            file_filter.map(|f| format!(" in {}", f)).unwrap_or_default(),
+            file_filter
+                .map(|f| format!(" in {}", f))
+                .unwrap_or_default(),
             dead.len()
         )];
 
         if dead.is_empty() {
-            lines.push("\nNo dead code found. All functions have at least one caller or importer.".to_string());
+            lines.push(
+                "\nNo dead code found. All functions have at least one caller or importer."
+                    .to_string(),
+            );
         } else {
             // Group by file
-            let mut by_file: std::collections::HashMap<&str, Vec<&crate::call_index::FuncRef>> = std::collections::HashMap::new();
+            let mut by_file: std::collections::HashMap<&str, Vec<&crate::call_index::FuncRef>> =
+                std::collections::HashMap::new();
             for func in &dead {
                 by_file.entry(&func.file).or_default().push(func);
             }
@@ -862,24 +938,45 @@ impl OfflineServer {
                     lines.push(format!("  {}() (line {})", f.name, f.line));
                 }
             }
-            lines.push("\nNote: exported functions may be used externally. Review before removing.".to_string());
+            lines.push(
+                "\nNote: exported functions may be used externally. Review before removing."
+                    .to_string(),
+            );
         }
 
         Ok(lines.join("\n"))
     }
 
     fn tool_git_blame(&self, args: &Value) -> Result<String, String> {
-        let file = args.get("file").and_then(|v| v.as_str()).ok_or("file required")?;
-        let line_start = args.get("line_start").and_then(|v| v.as_i64()).ok_or("line_start required")?;
-        let line_end = args.get("line_end").and_then(|v| v.as_i64()).unwrap_or(line_start);
-        let repo_path = args.get("repo_path").and_then(|v| v.as_str())
+        let file = args
+            .get("file")
+            .and_then(|v| v.as_str())
+            .ok_or("file required")?;
+        let line_start = args
+            .get("line_start")
+            .and_then(|v| v.as_i64())
+            .ok_or("line_start required")?;
+        let line_end = args
+            .get("line_end")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(line_start);
+        let repo_path = args
+            .get("repo_path")
+            .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default().to_string_lossy().to_string());
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            });
 
         let output = std::process::Command::new("git")
             .args([
-                "-C", &repo_path,
-                "blame", "--porcelain",
+                "-C",
+                &repo_path,
+                "blame",
+                "--porcelain",
                 &format!("-L{},{}", line_start, line_end),
                 file,
             ])
@@ -928,10 +1025,16 @@ impl OfflineServer {
         }
 
         if results.is_empty() {
-            return Ok(format!("No blame data for {}:{}-{}", file, line_start, line_end));
+            return Ok(format!(
+                "No blame data for {}:{}-{}",
+                file, line_start, line_end
+            ));
         }
 
-        let mut output_lines = vec![format!("=== git blame: {}:{}-{} ===", file, line_start, line_end)];
+        let mut output_lines = vec![format!(
+            "=== git blame: {}:{}-{} ===",
+            file, line_start, line_end
+        )];
         // Deduplicate consecutive same-commit lines
         let mut seen_commits: std::collections::HashSet<String> = std::collections::HashSet::new();
         for line in &results {
@@ -970,12 +1073,20 @@ impl OfflineServer {
         let file = args.get("file").and_then(|v| v.as_str());
         let function_name = args.get("function_name").and_then(|v| v.as_str());
         let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(10);
-        let repo_path = args.get("repo_path").and_then(|v| v.as_str())
+        let repo_path = args
+            .get("repo_path")
+            .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default().to_string_lossy().to_string());
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            });
 
         let mut cmd_args = vec![
-            "-C".to_string(), repo_path,
+            "-C".to_string(),
+            repo_path,
             "log".to_string(),
             format!("-{}", limit),
             "--format=%h %ad %an | %s".to_string(),
@@ -1039,7 +1150,20 @@ fn chrono_format(ts: i64) -> String {
     let days = ts / 86400;
     let y = 1970 + (days * 4 + 2) / 1461;
     let doy = days - (365 * (y - 1970) + (y - 1969) / 4);
-    let months = [31, 28 + if y % 4 == 0 { 1 } else { 0 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let months = [
+        31,
+        28 + if y % 4 == 0 { 1 } else { 0 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 0;
     let mut d = doy;
     for days_in_month in &months {
