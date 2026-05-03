@@ -87,11 +87,11 @@ install_nixos() {
     SRC_DIR="/tmp/savants-src"
     if [ -d "$SRC_DIR/.git" ]; then
         info "Updating source..."
-        git -C "$SRC_DIR" pull --quiet 2>/dev/null || true
+        git -C "$SRC_DIR" pull --quiet --tags 2>/dev/null || true
     else
         info "Cloning source..."
         rm -rf "$SRC_DIR"
-        git clone --quiet --depth 1 https://github.com/savants-dev/savants.git "$SRC_DIR"
+        git clone --quiet --depth 1 --tags https://github.com/savants-dev/savants.git "$SRC_DIR"
     fi
 
     info "Building (~2 min first time, ~30s updates)..."
