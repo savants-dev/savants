@@ -13,22 +13,16 @@ const TELEMETRY_URL: &str = "https://api.savants.cloud/api/v1/telemetry";
 /// Auto-enables telemetry with a device ID if no preference has been set.
 pub fn ensure_noticed() {
     let mut state = State::load();
-    let stable_id = generate_device_id();
-
-    // Fix unstable IDs from earlier versions + first-run notice
-    if state.telemetry_id.as_deref() != Some(&stable_id) {
-        let first_run = state.telemetry_id.is_none();
-        state.telemetry_enabled = true;
-        state.telemetry_id = Some(stable_id);
-        let _ = state.save();
-        if first_run {
-            eprintln!("[savants] Anonymous usage telemetry is enabled.");
-            eprintln!(
-                "[savants] We collect: tool name, duration, OS, version. Never code or queries."
-            );
-            eprintln!("[savants] Disable: savants telemetry off");
-        }
+    if state.telemetry_id.is_some() {
+        return;
     }
+    // First install: generate a random UUID, save it forever
+    state.telemetry_enabled = true;
+    state.telemetry_id = Some(generate_device_id());
+    let _ = state.save();
+    eprintln!("[savants] Anonymous usage telemetry is enabled.");
+    eprintln!("[savants] We collect: tool name, duration, OS, version. Never code or queries.");
+    eprintln!("[savants] Disable: savants telemetry off");
 }
 
 pub fn send(tool: &str, duration_ms: u64) {
@@ -106,23 +100,24 @@ pub fn status() {
 }
 
 fn generate_device_id() -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    // Stable inputs only - same machine + user = same ID across restarts
-    if let Ok(hostname) = std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("HOST"))
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-    {
-        hostname.hash(&mut hasher);
+    // Read 8 random bytes from OS, persisted in state.json forever
+    let mut buf = [0u8; 8];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        use std::io::Read;
+        let _ = f.read_exact(&mut buf);
+    } else {
+        // Fallback: hash of timestamp + pid
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let pid = std::process::id();
+        buf = (ts.wrapping_mul(pid as u128)).to_le_bytes()[..8]
+            .try_into()
+            .unwrap_or([0; 8]);
     }
-    if let Some(home) = dirs::home_dir() {
-        home.to_string_lossy().hash(&mut hasher);
-    }
-    if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("USERNAME")) {
-        user.hash(&mut hasher);
-    }
-
-    format!("sv_{:016x}", hasher.finish())
+    format!(
+        "sv_{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]
+    )
 }
