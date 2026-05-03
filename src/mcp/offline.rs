@@ -191,8 +191,8 @@ impl OfflineServer {
     }
 
     pub fn run(&self) {
+        crate::telemetry::ensure_noticed();
         eprintln!("Savants MCP server started (offline mode)");
-        eprintln!("Connect to savants.cloud for full intelligence tools: savants connect");
         let stdin = io::stdin();
         let stdout = io::stdout();
         let mut stats = SessionStats::default();

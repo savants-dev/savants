@@ -9,6 +9,23 @@ use crate::config::State;
 
 const TELEMETRY_URL: &str = "https://api.savants.cloud/api/v1/telemetry";
 
+/// Check if this is the first run and show the telemetry notice.
+/// Auto-enables telemetry with a device ID if no preference has been set.
+pub fn ensure_noticed() {
+    let mut state = State::load();
+    // If telemetry_id exists, user has already seen the notice
+    if state.telemetry_id.is_some() {
+        return;
+    }
+    // First run: enable by default, show notice
+    state.telemetry_enabled = true;
+    state.telemetry_id = Some(generate_device_id());
+    let _ = state.save();
+    eprintln!("[savants] Anonymous usage telemetry is enabled.");
+    eprintln!("[savants] We collect: tool name, duration, OS, version. Never code or queries.");
+    eprintln!("[savants] Disable: savants telemetry off");
+}
+
 pub fn send(tool: &str, duration_ms: u64) {
     let state = State::load();
     if !state.telemetry_enabled {
@@ -61,9 +78,7 @@ pub fn enable() {
         state.telemetry_id = Some(generate_device_id());
     }
     let _ = state.save();
-    eprintln!("Telemetry enabled. We collect: tool name, duration, OS/arch, version.");
-    eprintln!("We never collect: code, file paths, queries, or function names.");
-    eprintln!("Disable anytime: savants telemetry off");
+    eprintln!("Telemetry enabled.");
 }
 
 pub fn disable() {
