@@ -560,7 +560,14 @@ impl OfflineServer {
         let store = crate::embedding_store::EmbeddingStore::load(repo)?;
         let mut engine = crate::embeddings::EmbeddingEngine::new()?;
         let query_vec = engine.embed_one(query)?;
-        let results = store.search(&query_vec, limit);
+
+        // If embedding dimensions don't match (e.g. musl build without ONNX
+        // querying an index built with ONNX), fall back to text-based search
+        let results = if store.dim as usize != query_vec.len() {
+            text_search(&store.entries, query, limit)
+        } else {
+            store.search(&query_vec, limit)
+        };
 
         if results.is_empty() {
             return Ok(format!("No results for '{}' in {}", query, repo));
@@ -1143,6 +1150,90 @@ impl OfflineServer {
     fn response(&self, id: &Value, result: Value) -> Value {
         json!({"jsonrpc": "2.0", "id": id, "result": result})
     }
+}
+
+/// Text-based search fallback when embedding dimensions don't match.
+/// Scores entries by word overlap between query and function name + file path.
+fn text_search(
+    entries: &[crate::embedding_store::StoredEntry],
+    query: &str,
+    limit: usize,
+) -> Vec<(usize, f32)> {
+    let query_lower = query.to_lowercase();
+    let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+
+    let mut scores: Vec<(usize, f32)> = entries
+        .iter()
+        .enumerate()
+        .map(|(idx, entry)| {
+            let name_lower = entry.name.to_lowercase();
+            let file_lower = entry.file.to_lowercase();
+
+            let mut score = 0.0f32;
+
+            for word in &query_words {
+                // Exact name match is highest signal
+                if name_lower == *word {
+                    score += 5.0;
+                }
+                // Name contains query word
+                else if name_lower.contains(word) {
+                    score += 2.0;
+                }
+                // File path contains query word
+                if file_lower.contains(word) {
+                    score += 1.0;
+                }
+            }
+
+            // Bonus for camelCase/snake_case word boundary matches
+            let name_parts: Vec<String> = split_identifier(&entry.name);
+            for word in &query_words {
+                for part in &name_parts {
+                    if part == *word {
+                        score += 3.0;
+                    }
+                }
+            }
+
+            // Normalize by query length
+            if !query_words.is_empty() {
+                score /= query_words.len() as f32;
+            }
+
+            (idx, score)
+        })
+        .filter(|(_, score)| *score > 0.0)
+        .collect();
+
+    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scores.truncate(limit);
+    scores
+}
+
+/// Split camelCase or snake_case identifier into words.
+fn split_identifier(name: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+
+    for ch in name.chars() {
+        if ch == '_' || ch == '-' {
+            if !current.is_empty() {
+                words.push(current.to_lowercase());
+                current.clear();
+            }
+        } else if ch.is_uppercase() && !current.is_empty() {
+            words.push(current.to_lowercase());
+            current.clear();
+            current.push(ch);
+        } else {
+            current.push(ch);
+        }
+    }
+    if !current.is_empty() {
+        words.push(current.to_lowercase());
+    }
+    words
 }
 
 fn chrono_format(ts: i64) -> String {
