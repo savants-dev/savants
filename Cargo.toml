@@ -29,12 +29,10 @@ tree-sitter-python = "0.21"
 tree-sitter-rust = "0.21"
 walkdir = "2"
 fastembed = { version = "5", optional = true }
-openssl = { version = "0.10", features = ["vendored"], optional = true }
 
 [features]
 default = ["embeddings"]
 embeddings = ["fastembed"]
-vendored-openssl = ["openssl"]
 
 [profile.release]
 opt-level = 3
