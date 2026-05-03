@@ -343,6 +343,14 @@ impl OfflineServer {
                 }, "required": ["file", "line_start"]}
             },
             {
+                "name": "test_coverage",
+                "description": "Find functions with NO test coverage. Cross-references production code against test files to find untested functions. Groups by file, shows coverage percentage. Essential before shipping.",
+                "inputSchema": {"type": "object", "properties": {
+                    "repo": {"type": "string", "description": "Repository name (auto-detected from cwd if omitted)"},
+                    "file": {"type": "string", "description": "Limit to a specific file or directory (optional)"}
+                }}
+            },
+            {
                 "name": "git_log",
                 "description": "Use BEFORE running Bash git log. Shows commit history for a file or tracks a specific function's evolution over time using git log -L. Returns author, date, message per commit.",
                 "inputSchema": {"type": "object", "properties": {
@@ -375,6 +383,7 @@ impl OfflineServer {
                 | "callers"
                 | "blast_radius"
                 | "dead_code"
+                | "test_coverage"
         );
         if needs_index {
             let repo = args
@@ -397,6 +406,7 @@ impl OfflineServer {
             "reindex" => self.tool_reindex(args),
             "blast_radius" => self.tool_blast_radius(args),
             "dead_code" => self.tool_dead_code(args),
+            "test_coverage" => self.tool_test_coverage(args),
             "git_blame" => self.tool_git_blame(args),
             "git_log" => self.tool_git_log(args),
             _ => Err(format!(
@@ -949,6 +959,133 @@ impl OfflineServer {
                 "\nNote: exported functions may be used externally. Review before removing."
                     .to_string(),
             );
+        }
+
+        Ok(lines.join("\n"))
+    }
+
+    fn tool_test_coverage(&self, args: &Value) -> Result<String, String> {
+        let repo = args
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let file_filter = args.get("file").and_then(|v| v.as_str());
+
+        if !crate::call_index::CallIndex::exists(repo) {
+            return Ok(
+                "No index. Auto-indexing should have run - try calling semantic_search first."
+                    .to_string(),
+            );
+        }
+
+        let ci = crate::call_index::CallIndex::load(repo)?;
+
+        let is_test_file = |path: &str| -> bool {
+            let p = path.to_lowercase();
+            p.contains("test")
+                || p.contains("spec")
+                || p.contains("__tests__")
+                || p.ends_with("_test.rs")
+                || p.ends_with("_test.go")
+                || p.ends_with(".test.ts")
+                || p.ends_with(".test.js")
+                || p.ends_with(".spec.ts")
+                || p.ends_with(".spec.js")
+        };
+
+        // Collect all test-file callers for each function
+        let mut tested_functions: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for (func_name, callers) in &ci.callers {
+            for caller in callers {
+                if is_test_file(&caller.file) {
+                    tested_functions.insert(func_name.clone());
+                }
+            }
+        }
+
+        // Find production functions not called from any test
+        let mut untested: Vec<&crate::call_index::FuncRef> = Vec::new();
+        let mut total_prod = 0;
+
+        let skip_names = [
+            "main",
+            "default",
+            "setup",
+            "teardown",
+            "init",
+            "constructor",
+            "render",
+            "mount",
+            "unmount",
+            "new",
+        ];
+
+        for func in &ci.functions {
+            // Skip test files themselves
+            if is_test_file(&func.file) {
+                continue;
+            }
+            // Skip if file filter doesn't match
+            if let Some(filter) = file_filter {
+                if !func.file.contains(filter) {
+                    continue;
+                }
+            }
+            // Skip trivial functions
+            if skip_names.contains(&func.name.as_str()) {
+                continue;
+            }
+
+            total_prod += 1;
+
+            if !tested_functions.contains(&func.name) {
+                untested.push(func);
+            }
+        }
+
+        let tested_count = total_prod - untested.len();
+        let coverage_pct = if total_prod > 0 {
+            (tested_count as f64 / total_prod as f64 * 100.0) as u32
+        } else {
+            0
+        };
+
+        let mut lines = vec![format!(
+            "=== Test coverage{} ===\n{}/{} functions have test callers ({}%)",
+            file_filter
+                .map(|f| format!(" for {}", f))
+                .unwrap_or_default(),
+            tested_count,
+            total_prod,
+            coverage_pct
+        )];
+
+        if untested.is_empty() {
+            lines.push("\nAll production functions have at least one test caller.".to_string());
+        } else {
+            // Group by file
+            let mut by_file: std::collections::HashMap<&str, Vec<&crate::call_index::FuncRef>> =
+                std::collections::HashMap::new();
+            for func in &untested {
+                by_file.entry(&func.file).or_default().push(func);
+            }
+
+            let mut files: Vec<&&str> = by_file.keys().collect();
+            files.sort();
+
+            lines.push(format!(
+                "\nUntested ({} functions in {} files):",
+                untested.len(),
+                files.len()
+            ));
+            for file in files {
+                let funcs = &by_file[file];
+                lines.push(format!("\n  {} ({} untested):", file, funcs.len()));
+                for f in funcs {
+                    lines.push(format!("    {}() line {}", f.name, f.line));
+                }
+            }
         }
 
         Ok(lines.join("\n"))
