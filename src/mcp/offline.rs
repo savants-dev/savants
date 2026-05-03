@@ -1256,7 +1256,7 @@ impl OfflineServer {
             }
         }
 
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1));
 
         let mut lines = vec![format!(
             "=== Entry points{} ({} found) ===",
@@ -1362,9 +1362,8 @@ impl OfflineServer {
                 }
             } else if let Some(val) = line.strip_prefix("summary ") {
                 summary = val.to_string();
-            } else if line.starts_with('\t') {
+            } else if let Some(code) = line.strip_prefix('\t') {
                 // Content line - emit the result
-                let code = &line[1..];
                 results.push(format!(
                     "L{}: {} | {} ({}) | {}",
                     line_num, current_hash, author, date, summary
