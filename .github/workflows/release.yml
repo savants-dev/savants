@@ -74,6 +74,8 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
           - target: aarch64-apple-darwin
             os: macos-14
 
@@ -90,9 +92,13 @@ jobs:
           rm -f Cargo.toml.bak
           grep "^version" Cargo.toml
 
-      - name: Install OpenSSL (Linux)
-        if: runner.os == 'Linux'
+      - name: Install deps (Linux glibc)
+        if: runner.os == 'Linux' && !contains(matrix.target, 'musl')
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Install deps (Linux musl)
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools pkg-config libssl-dev
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
