@@ -99,6 +99,8 @@ install_nixos() {
         --run "cd $SRC_DIR && cargo build --release 2>&1" | tail -3
 
     if [ -f "$SRC_DIR/target/release/savants" ]; then
+        rm -f "$BIN_DIR/savants.old" 2>/dev/null
+        mv "$BIN_DIR/savants" "$BIN_DIR/savants.old" 2>/dev/null || true
         cp "$SRC_DIR/target/release/savants" "$BIN_DIR/savants"
         chmod +x "$BIN_DIR/savants"
         ensure_path
@@ -161,9 +163,10 @@ main() {
         error "Download failed. Check https://github.com/savants-dev/savants/releases"
     fi
 
-    # Extract and install
+    # Extract and install (rename old binary first to avoid "Text file busy")
+    rm -f "$BIN_DIR/savants.old" 2>/dev/null
+    mv "$BIN_DIR/savants" "$BIN_DIR/savants.old" 2>/dev/null || true
     tar xzf "$TMP_FILE" -C "$BIN_DIR"
-    # Handle both tarball layouts (flat binary or named binary)
     [ -f "$BIN_DIR/savants-${TARGET}" ] && mv "$BIN_DIR/savants-${TARGET}" "$BIN_DIR/savants"
     chmod +x "$BIN_DIR/savants"
     rm -f "$TMP_FILE"
