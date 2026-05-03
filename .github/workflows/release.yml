@@ -98,10 +98,15 @@ jobs:
 
       - name: Install deps (Linux musl)
         if: contains(matrix.target, 'musl')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools pkg-config libssl-dev
+        run: sudo apt-get update && sudo apt-get install -y musl-tools pkg-config
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          FEATURES=""
+          if [[ "${{ matrix.target }}" == *musl* ]]; then
+            FEATURES="--features vendored-openssl"
+          fi
+          cargo build --release --target ${{ matrix.target }} $FEATURES
 
       - name: Package
         run: |
