@@ -108,22 +108,31 @@ async fn main() {
             commands::status::run();
         }
         Commands::Serve => {
-            let cloud_url = std::env::var("SAVANTS_CLOUD_URL").ok();
+            let state = config::State::load();
+
+            // Auto-detect cloud mode: if user ran `savants connect`, use cloud proxy
+            let cloud_url = std::env::var("SAVANTS_CLOUD_URL")
+                .ok()
+                .or_else(|| {
+                    if state.cloud_token.is_some() {
+                        Some("https://api.savants.cloud".to_string())
+                    } else {
+                        None
+                    }
+                });
+
             let api_key = std::env::var("SAVANTS_API_KEY")
                 .ok()
                 .filter(|k| !k.is_empty())
-                .or_else(|| {
-                    // Fall back to JWT from state file (set by savants connect)
-                    let state = config::State::load();
-                    state.cloud_token.clone()
-                })
+                .or_else(|| state.cloud_token.clone())
                 .unwrap_or_default();
 
             if let Some(url) = cloud_url {
+                // Hybrid mode: local tools run locally, cloud tools proxy
                 let proxy = mcp::CloudProxyServer::new(&url, &api_key);
                 proxy.run();
             } else {
-                // Offline mode: serve local-only tools (semantic search, file skeleton)
+                // Pure offline mode
                 let server = mcp::OfflineServer::new();
                 server.run();
             }

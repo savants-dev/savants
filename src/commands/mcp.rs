@@ -21,20 +21,11 @@ fn find_savants_binary() -> String {
 fn mcp_config_json() -> serde_json::Value {
     let bin = find_savants_binary();
 
-    // Include cloud URL if connected
-    let state = crate::config::State::load();
-    let mut config = json!({
+    // Cloud mode is auto-detected from state file - no env vars needed
+    json!({
         "command": bin,
         "args": ["serve"]
-    });
-
-    if state.is_cloud_authenticated() {
-        config["env"] = json!({
-            "SAVANTS_CLOUD_URL": "https://api.savants.cloud"
-        });
-    }
-
-    config
+    })
 }
 
 /// All savants MCP tool names (used for allowlist).
@@ -43,7 +34,12 @@ const TOOL_NAMES: &[&str] = &[
     "file_skeleton",
     "where_used",
     "callers",
+    "blast_radius",
+    "dead_code",
+    "git_blame",
+    "git_log",
     "reindex",
+    "session_stats",
 ];
 
 pub fn install(scope: &str, tool: &str) {
@@ -216,25 +212,17 @@ fn fix_stale_mcp_configs(current_config: &serde_json::Value) {
         // Check if savants entry exists but is outdated
         if let Some(servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
             if let Some(savants) = servers.get("savants") {
-                let has_cloud = savants
-                    .get("env")
-                    .and_then(|e| e.get("SAVANTS_CLOUD_URL"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| !s.is_empty())
-                    .unwrap_or(false);
+                let needs_update = savants.get("env").is_some() // Remove env vars (cloud auto-detected now)
+                    || savants.get("command").and_then(|v| v.as_str())
+                        .map(|c| !c.contains(".savants/bin/"))
+                        .unwrap_or(false); // Update old binary paths
 
-                let current_has_cloud = current_config
-                    .get("env")
-                    .and_then(|e| e.get("SAVANTS_CLOUD_URL"))
-                    .is_some();
-
-                // Update if current config has cloud but this file doesn't
-                if current_has_cloud && !has_cloud {
+                if needs_update {
                     servers.insert("savants".to_string(), current_config.clone());
                     let updated = serde_json::to_string_pretty(&config).unwrap() + "\n";
                     let _ = fs::write(loc, &updated);
                     println!(
-                        "  Updated {} with cloud config",
+                        "  Updated {}",
                         loc.display().to_string().cyan()
                     );
                 }

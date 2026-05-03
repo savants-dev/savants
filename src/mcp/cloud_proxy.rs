@@ -110,25 +110,24 @@ impl CloudProxyServer {
                 let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
-                // LOCAL tools run on user's machine - never proxy to cloud
-                let local_tools = [
-                    "semantic_search",
-                    "file_skeleton",
-                    "where_used",
-                    "callers",
-                    "blast_radius",
-                    "dead_code",
-                    "session_stats",
-                    "git_blame",
-                    "git_log",
-                ];
-                if local_tools.contains(&tool_name) {
+                // LOCAL FIRST: try running the tool locally.
+                // If the offline server can handle it, use that. Only proxy to
+                // cloud for tools that don't exist locally.
+                {
                     let offline = super::offline::OfflineServer::new();
                     let result = offline.call_tool_direct(tool_name, &arguments);
-                    return match result {
-                        Ok(text) => Some(self.response(&req_id, json!({"content": [{"type": "text", "text": text}]}))),
-                        Err(e) => Some(self.response(&req_id, json!({"content": [{"type": "text", "text": format!("Error: {}", e)}], "isError": true}))),
-                    };
+                    match result {
+                        Ok(text) => {
+                            return Some(self.response(&req_id, json!({"content": [{"type": "text", "text": text}]})));
+                        }
+                        Err(ref e) if !e.contains("requires savants.cloud") => {
+                            // Local tool ran but hit an error - still return it
+                            return Some(self.response(&req_id, json!({"content": [{"type": "text", "text": format!("Could not complete: {}. Try a different input or use Grep as fallback.", e)}]})));
+                        }
+                        Err(_) => {
+                            // Tool not available locally - fall through to cloud proxy
+                        }
+                    }
                 }
 
                 // Reindex runs LOCALLY (parses code on user's machine),
