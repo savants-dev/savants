@@ -257,7 +257,11 @@ impl OfflineServer {
                         stats.record_call(tool, text.len(), duration_ms);
                         Some(self.response(&req_id, json!({"content": [{"type": "text", "text": text}]})))
                     },
-                    Err(e) => Some(self.response(&req_id, json!({"content": [{"type": "text", "text": format!("Error: {}", e)}], "isError": true}))),
+                    Err(e) => {
+                        // Return as content, not isError - errors make Claude avoid the tool
+                        let msg = format!("Could not complete: {}. Try a different search term or use Grep as fallback.", e);
+                        Some(self.response(&req_id, json!({"content": [{"type": "text", "text": msg}]})))
+                    },
                 }
             }
             "resources/list" => Some(self.response(&req_id, json!({"resources": []}))),
@@ -270,47 +274,47 @@ impl OfflineServer {
         json!([
             {
                 "name": "semantic_search",
-                "description": "NATURAL LANGUAGE CODE SEARCH: Find functions by describing what they do. 'payment retry logic' finds handleTransactionWithBackoff. 90% accuracy. Works offline.",
+                "description": "Use BEFORE Grep. Finds code by meaning: 'payment retry logic' returns handleTransactionWithBackoff even though those words don't appear in it. Grep can't do concept search. Returns function name, file, line, relevance score. Auto-indexes on first use.",
                 "inputSchema": {"type": "object", "properties": {
-                    "query": {"type": "string", "description": "What you're looking for in natural language"},
-                    "repo": {"type": "string", "description": "Repository name"},
+                    "query": {"type": "string", "description": "Natural language: what the code does, not what it's named"},
+                    "repo": {"type": "string", "description": "Repository name (auto-detected from cwd if omitted)"},
                     "limit": {"type": "integer", "description": "Max results (default 10)"}
                 }, "required": ["query"]}
             },
             {
                 "name": "file_skeleton",
-                "description": "FASTER THAN READ: Returns file structure - function names, signatures, line ranges. No bodies. 10x fewer tokens than reading the full file.",
+                "description": "Use BEFORE Read. Returns every function name, class, and type in a file with line numbers - no bodies. Use this to decide WHICH functions to read instead of reading the entire file. 10x fewer tokens. Works without indexing.",
                 "inputSchema": {"type": "object", "properties": {
                     "file": {"type": "string", "description": "File path relative to repo root"},
-                    "repo": {"type": "string", "description": "Repository name"}
+                    "repo": {"type": "string", "description": "Repository name (auto-detected from cwd if omitted)"}
                 }, "required": ["file"]}
             },
             {
                 "name": "where_used",
-                "description": "FASTER THAN GREP: Find every place a function is called or imported across the codebase. Returns callers and importers.",
+                "description": "Use BEFORE Grep for usage search. Returns every caller and importer of a function across the entire codebase from the pre-built call index. Grep matches text; this returns verified structural references with file and function context.",
                 "inputSchema": {"type": "object", "properties": {
-                    "symbol": {"type": "string", "description": "Function name to search for"},
-                    "repo": {"type": "string", "description": "Repository name"}
+                    "symbol": {"type": "string", "description": "Function or symbol name"},
+                    "repo": {"type": "string", "description": "Repository name (auto-detected from cwd if omitted)"}
                 }, "required": ["symbol"]}
             },
             {
                 "name": "callers",
-                "description": "FASTER THAN GREP: Find all functions that directly call a given function.",
+                "description": "Use BEFORE Grep for caller search. Returns the exact functions that call a given function, from the pre-built call index. No false positives from variable names or comments matching.",
                 "inputSchema": {"type": "object", "properties": {
                     "function": {"type": "string", "description": "Function name"},
-                    "repo": {"type": "string", "description": "Repository name"}
+                    "repo": {"type": "string", "description": "Repository name (auto-detected from cwd if omitted)"}
                 }, "required": ["function"]}
             },
             {
                 "name": "reindex",
-                "description": "Parse and index a repository for semantic search. Run this first.",
+                "description": "Rebuild the code index for a repository. Usually not needed - indexing happens automatically on first tool use. Use this to force a refresh after major changes.",
                 "inputSchema": {"type": "object", "properties": {
                     "repo_path": {"type": "string", "description": "Absolute path to repository"}
                 }, "required": ["repo_path"]}
             },
             {
                 "name": "git_blame",
-                "description": "WHEN WAS THIS BUG INTRODUCED? Given a file and line range, returns who wrote it, when, and the commit message. Use after finding a buggy line to trace its origin. FREE, runs locally.",
+                "description": "Use BEFORE running Bash git blame. Returns who wrote specific lines, when, the commit hash, and commit message. Use after finding a bug to trace when and why it was introduced.",
                 "inputSchema": {"type": "object", "properties": {
                     "file": {"type": "string", "description": "File path relative to repo root"},
                     "line_start": {"type": "integer", "description": "Start line number"},
@@ -320,17 +324,17 @@ impl OfflineServer {
             },
             {
                 "name": "git_log",
-                "description": "RECENT CHANGES TO A FILE OR FUNCTION. Shows commit history with authors, dates, and messages. Use to understand how code evolved. FREE, runs locally.",
+                "description": "Use BEFORE running Bash git log. Shows commit history for a file or tracks a specific function's evolution over time using git log -L. Returns author, date, message per commit.",
                 "inputSchema": {"type": "object", "properties": {
                     "file": {"type": "string", "description": "File path (optional - omit for full repo history)"},
-                    "function_name": {"type": "string", "description": "Function name to trace (uses git log -L)"},
+                    "function_name": {"type": "string", "description": "Track a specific function's history (uses git log -L for precise function-level tracking)"},
                     "limit": {"type": "integer", "description": "Max commits (default 10)"},
                     "repo_path": {"type": "string", "description": "Path to repository (defaults to cwd)"}
                 }}
             },
             {
                 "name": "session_stats",
-                "description": "SAVANTS EFFICIENCY QUOTIENT (SEQ): Your AI agent's context efficiency score (0-100). Measures precision (right result first try), cost (tokens saved vs grep), and velocity (response speed). Call this to see your score. Zero cost.",
+                "description": "Shows how efficiently savants tools were used this session: tokens saved vs grep/read approach, response speed, and precision score (0-100).",
                 "inputSchema": {"type": "object", "properties": {}}
             }
         ])
@@ -684,7 +688,7 @@ impl OfflineServer {
         }
 
         if callers.is_empty() && importers.is_empty() {
-            lines.push(format!("\nNo usages found for '{}'", symbol));
+            lines.push(format!("\nNo usages found for '{}' in the indexed codebase. It may be an entry point, exported API, or referenced dynamically.", symbol));
         }
 
         Ok(lines.join("\n"))
@@ -708,7 +712,7 @@ impl OfflineServer {
         let callers = ci.find_callers(function);
 
         if callers.is_empty() {
-            return Ok(format!("No callers found for '{}'", function));
+            return Ok(format!("No callers found for '{}' in the indexed codebase. This function may be an entry point, exported API, or called dynamically.", function));
         }
 
         let mut lines = vec![format!(
