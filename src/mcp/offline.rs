@@ -361,6 +361,23 @@ impl OfflineServer {
                 }}
             },
             {
+                "name": "hotspots",
+                "description": "Find risky code: files that change often AND have high blast radius. Combines git churn with dependency analysis. These are the files most likely to cause production incidents.",
+                "inputSchema": {"type": "object", "properties": {
+                    "repo": {"type": "string", "description": "Repository name (auto-detected from cwd if omitted)"},
+                    "limit": {"type": "integer", "description": "Max results (default 15)"},
+                    "repo_path": {"type": "string", "description": "Path to repository (defaults to cwd)"}
+                }}
+            },
+            {
+                "name": "entry_points",
+                "description": "Find the public API surface: functions with callers but no one calls them - they ARE the entry points. Shows your module's external interface. Useful for understanding what a module exposes.",
+                "inputSchema": {"type": "object", "properties": {
+                    "repo": {"type": "string", "description": "Repository name (auto-detected from cwd if omitted)"},
+                    "file": {"type": "string", "description": "Limit to a specific file or directory (optional)"}
+                }}
+            },
+            {
                 "name": "session_stats",
                 "description": "Shows how efficiently savants tools were used this session: tokens saved vs grep/read approach, response speed, and precision score (0-100).",
                 "inputSchema": {"type": "object", "properties": {}}
@@ -384,6 +401,8 @@ impl OfflineServer {
                 | "blast_radius"
                 | "dead_code"
                 | "test_coverage"
+                | "hotspots"
+                | "entry_points"
         );
         if needs_index {
             let repo = args
@@ -407,6 +426,8 @@ impl OfflineServer {
             "blast_radius" => self.tool_blast_radius(args),
             "dead_code" => self.tool_dead_code(args),
             "test_coverage" => self.tool_test_coverage(args),
+            "hotspots" => self.tool_hotspots(args),
+            "entry_points" => self.tool_entry_points(args),
             "git_blame" => self.tool_git_blame(args),
             "git_log" => self.tool_git_log(args),
             _ => Err(format!(
@@ -1084,6 +1105,190 @@ impl OfflineServer {
                 lines.push(format!("\n  {} ({} untested):", file, funcs.len()));
                 for f in funcs {
                     lines.push(format!("    {}() line {}", f.name, f.line));
+                }
+            }
+        }
+
+        Ok(lines.join("\n"))
+    }
+
+    fn tool_hotspots(&self, args: &Value) -> Result<String, String> {
+        let repo = args
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(15) as usize;
+        let repo_path = args
+            .get("repo_path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            });
+
+        if !crate::call_index::CallIndex::exists(repo) {
+            return Ok("No index. Run semantic_search first to auto-index.".to_string());
+        }
+
+        let ci = crate::call_index::CallIndex::load(repo)?;
+
+        // Git churn: count commits per file in last 90 days
+        let output = std::process::Command::new("git")
+            .args([
+                "-C",
+                &repo_path,
+                "log",
+                "--since=90 days ago",
+                "--format=",
+                "--name-only",
+            ])
+            .output()
+            .map_err(|e| format!("git log failed: {}", e))?;
+
+        let mut churn: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        if output.status.success() {
+            let raw = String::from_utf8_lossy(&output.stdout);
+            for line in raw.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    *churn.entry(trimmed.to_string()).or_default() += 1;
+                }
+            }
+        }
+
+        // Caller count per file (blast radius proxy)
+        let mut file_callers: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+        for func in &ci.functions {
+            let caller_count = ci
+                .callers
+                .get(&func.name)
+                .map(|c| c.len() as u32)
+                .unwrap_or(0);
+            *file_callers.entry(func.file.clone()).or_default() += caller_count;
+        }
+
+        // Score = churn * sqrt(callers)
+        let mut scores: Vec<(String, f32, u32, u32)> = churn
+            .iter()
+            .map(|(file, &commits)| {
+                let callers = file_callers.get(file).copied().unwrap_or(0);
+                let score = commits as f32 * (callers as f32 + 1.0).sqrt();
+                (file.clone(), score, commits, callers)
+            })
+            .filter(|(_, score, _, _)| *score > 0.0)
+            .collect();
+
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores.truncate(limit);
+
+        let mut lines = vec!["=== Hotspots (high churn + high blast radius) ===".to_string()];
+
+        if scores.is_empty() {
+            lines.push("\nNo hotspots found in the last 90 days.".to_string());
+        } else {
+            lines.push("Risk = commits * sqrt(dependents)\n".to_string());
+            for (file, score, commits, callers) in &scores {
+                let risk = if *score > 50.0 {
+                    "HIGH"
+                } else if *score > 20.0 {
+                    "MEDIUM"
+                } else {
+                    "LOW"
+                };
+                lines.push(format!(
+                    "  [{:>6}] {} - {} commits, {} dependents ({})",
+                    format!("{:.0}", score),
+                    file,
+                    commits,
+                    callers,
+                    risk
+                ));
+            }
+        }
+
+        Ok(lines.join("\n"))
+    }
+
+    fn tool_entry_points(&self, args: &Value) -> Result<String, String> {
+        let repo = args
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let file_filter = args.get("file").and_then(|v| v.as_str());
+
+        if !crate::call_index::CallIndex::exists(repo) {
+            return Ok("No index. Run semantic_search first to auto-index.".to_string());
+        }
+
+        let ci = crate::call_index::CallIndex::load(repo)?;
+
+        let is_test_file = |path: &str| -> bool {
+            let p = path.to_lowercase();
+            p.contains("test") || p.contains("spec") || p.contains("__tests__")
+        };
+
+        let mut entries: Vec<(&crate::call_index::FuncRef, usize)> = Vec::new();
+
+        for func in &ci.functions {
+            if is_test_file(&func.file) {
+                continue;
+            }
+            if let Some(filter) = file_filter {
+                if !func.file.contains(filter) {
+                    continue;
+                }
+            }
+
+            let has_callers = ci
+                .callers
+                .get(&func.name)
+                .map(|c| !c.is_empty())
+                .unwrap_or(false);
+            let callees_count = ci.callees.get(&func.name).map(|c| c.len()).unwrap_or(0);
+
+            // Entry point: nobody calls it, but it calls other things
+            if !has_callers && callees_count > 0 {
+                entries.push((func, callees_count));
+            }
+        }
+
+        entries.sort_by(|a, b| b.1.cmp(&a.1));
+
+        let mut lines = vec![format!(
+            "=== Entry points{} ({} found) ===",
+            file_filter
+                .map(|f| format!(" for {}", f))
+                .unwrap_or_default(),
+            entries.len()
+        )];
+
+        if entries.is_empty() {
+            lines.push(
+                "\nNo entry points found. All functions are called by other functions.".to_string(),
+            );
+        } else {
+            let mut by_file: std::collections::HashMap<
+                &str,
+                Vec<(&crate::call_index::FuncRef, usize)>,
+            > = std::collections::HashMap::new();
+            for (func, depth) in &entries {
+                by_file.entry(&func.file).or_default().push((func, *depth));
+            }
+
+            let mut files: Vec<&&str> = by_file.keys().collect();
+            files.sort();
+            for file in files {
+                let funcs = &by_file[file];
+                lines.push(format!("\n  {}:", file));
+                for (f, callees) in funcs {
+                    lines.push(format!(
+                        "    {}() line {} - calls {} functions",
+                        f.name, f.line, callees
+                    ));
                 }
             }
         }
